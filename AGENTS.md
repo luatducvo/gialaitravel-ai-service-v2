@@ -72,7 +72,7 @@ src/
 
 ## 6. Deployment & CI/CD
 - **Dockerization:** We use a `uv`-based slim Dockerfile (`Dockerfile`) that leverages cache mounts to build fast and lightweight Docker images. It runs with the virtual environment activated on the PATH and exposes port 8000.
-- **CI/CD Pipeline:** GitHub Actions (`.github/workflows/ci-cd.yml`) automates checks on every push and pull request to `main`, `master`, and `develop`. It runs lint checking using Ruff, unit testing via pytest, and builds/pushes the Docker image to GitHub Container Registry (GHCR) on pushes to `main` or `master`.
+- **CI/CD Pipeline:** GitHub Actions (`.github/workflows/ci-cd.yml`) automates building and pushing the Docker image to GitHub Container Registry (GHCR) on pushes to `main` or `master`.
 
 ---
 **Note for AI Agents:** By maintaining this structure, the source code will be highly testable (via mocking repository interfaces) and easy to maintain. Ensure that any code changes or additions respect this separation of concerns.
