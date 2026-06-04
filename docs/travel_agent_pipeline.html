@@ -1,0 +1,216 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+body{font-family:var(--font-sans);color:var(--color-text-primary);font-size:14px}
+.stage{border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);margin-bottom:10px;overflow:hidden;cursor:pointer;transition:border-color .15s}
+.stage:hover{border-color:var(--color-border-primary)}
+.stage.active{border-color:#378ADD;border-width:1.5px}
+.stage-header{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--color-background-primary)}
+.stage-num{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:500;flex-shrink:0}
+.stage-title{font-size:14px;font-weight:500;flex:1}
+.stage-meta{font-size:12px;color:var(--color-text-secondary)}
+.stage-body{border-top:0.5px solid var(--color-border-tertiary);padding:14px 16px;background:var(--color-background-secondary);display:none}
+.stage.active .stage-body{display:block}
+.badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:var(--border-radius-md);font-weight:500;margin:2px}
+.b-teal{background:#E1F5EE;color:#085041}
+.b-blue{background:#E6F1FB;color:#0C447C}
+.b-purple{background:#EEEDFE;color:#3C3489}
+.b-amber{background:#FAEEDA;color:#633806}
+.b-coral{background:#FAECE7;color:#712B13}
+.b-gray{background:var(--color-background-tertiary);color:var(--color-text-secondary)}
+.chat-wrap{background:var(--color-background-tertiary);border-radius:var(--border-radius-md);padding:12px;margin-top:10px}
+.bubble{padding:8px 12px;border-radius:10px;font-size:13px;line-height:1.6;margin-bottom:6px;max-width:88%}
+.bubble-agent{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:10px 10px 10px 2px}
+.bubble-user{background:#E6F1FB;color:#042C53;margin-left:auto;border-radius:10px 10px 2px 10px}
+.chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{padding:5px 12px;border-radius:20px;font-size:12px;border:0.5px solid var(--color-border-secondary);background:var(--color-background-primary);cursor:pointer;color:var(--color-text-primary);transition:background .12s,border-color .12s}
+.chip:hover,.chip.sel{background:#E6F1FB;border-color:#378ADD;color:#0C447C}
+.field-row{display:flex;gap:8px;align-items:center;margin-bottom:8px;font-size:13px}
+.field-label{color:var(--color-text-secondary);min-width:90px}
+.field-val{font-weight:500}
+.connector{display:flex;justify-content:center;margin:2px 0}
+.connector-line{width:1.5px;height:16px;background:var(--color-border-secondary)}
+.node-box{border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:6px 12px;font-size:12px;background:var(--color-background-primary);display:inline-block}
+.itin-day{border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:10px 12px;background:var(--color-background-primary);margin-bottom:8px}
+.itin-day-title{font-size:13px;font-weight:500;margin-bottom:8px;color:var(--color-text-primary)}
+.itin-stop{display:flex;gap:10px;align-items:flex-start;margin-bottom:8px;font-size:13px}
+.itin-dot{width:8px;height:8px;border-radius:50%;margin-top:5px;flex-shrink:0}
+.edit-bubble{background:#FAEEDA;border-radius:10px 10px 2px 10px;padding:8px 12px;font-size:13px;line-height:1.6;margin-left:auto;max-width:88%;color:#412402;margin-bottom:6px}
+.agent-fix{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:10px 10px 10px 2px;padding:8px 12px;font-size:13px;line-height:1.6;margin-bottom:6px;max-width:88%}
+.fix-highlight{background:#E1F5EE;border-left:2px solid #1D9E75;padding:4px 8px;border-radius:0 var(--border-radius-md) var(--border-radius-md) 0;font-size:12px;margin-top:6px;color:#085041}
+</style>
+
+<h2 class="sr-only">Pipeline thiết kế agent thu thập thông tin và tạo lịch trình du lịch Gia Lai</h2>
+
+<div style="padding:1rem 0">
+
+<div style="font-size:13px;color:var(--color-text-secondary);margin-bottom:14px">Click vào từng bước để xem chi tiết — pipeline 3 giai đoạn chính</div>
+
+<div class="stage active" id="s1" onclick="toggle('s1')">
+  <div class="stage-header">
+    <div class="stage-num" style="background:#E6F1FB;color:#0C447C">1</div>
+    <div class="stage-title">Cold-start — thu thập ràng buộc cứng</div>
+    <div class="stage-meta">3 câu · 60 giây</div>
+    <i class="ti ti-chevron-down" style="font-size:16px;color:var(--color-text-secondary)" aria-hidden="true"></i>
+  </div>
+  <div class="stage-body">
+    <div style="font-size:13px;color:var(--color-text-secondary);margin-bottom:10px">Agent hỏi tối đa 3 câu ngắn, mỗi câu dùng chip chọn nhanh thay vì gõ. Mục tiêu: lấy đủ dữ liệu để tạo <span style="font-family:var(--font-mono);font-size:12px">must_filter</span> cho Qdrant.</div>
+    <div class="chat-wrap">
+      <div class="bubble bubble-agent">Xin chào! Bạn đang lên kế hoạch khám phá Gia Lai — tuyệt lắm. Để gợi ý phù hợp, mình chỉ cần hỏi nhanh 3 câu thôi nhé.</div>
+      <div class="bubble bubble-agent">
+        <b style="font-size:12px;display:block;margin-bottom:6px">Chuyến đi của bạn?</b>
+        <div class="chip-row">
+          <div class="chip sel">2 ngày 1 đêm</div>
+          <div class="chip">3 ngày 2 đêm</div>
+          <div class="chip">4 ngày 3 đêm</div>
+          <div class="chip">Dài hơn</div>
+        </div>
+      </div>
+      <div class="bubble bubble-agent" style="margin-top:6px">
+        <b style="font-size:12px;display:block;margin-bottom:6px">Nhóm đồng hành?</b>
+        <div class="chip-row">
+          <div class="chip">Một mình</div>
+          <div class="chip sel">Cặp đôi</div>
+          <div class="chip">Nhóm bạn</div>
+          <div class="chip">Gia đình (có trẻ em / người cao tuổi)</div>
+        </div>
+      </div>
+      <div class="bubble bubble-agent" style="margin-top:6px">
+        <b style="font-size:12px;display:block;margin-bottom:6px">Di chuyển bằng gì?</b>
+        <div class="chip-row">
+          <div class="chip sel">Xe máy tự lái</div>
+          <div class="chip">Thuê ô tô</div>
+          <div class="chip">Chưa biết</div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:12px;font-size:12px;color:var(--color-text-secondary);margin-bottom:6px">Working Memory sau bước này:</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      <span class="badge b-teal">duration: 2 ngày</span>
+      <span class="badge b-teal">group: couple</span>
+      <span class="badge b-teal">transport: motorbike</span>
+      <span class="badge b-blue">→ intensity filter: Low + Medium</span>
+      <span class="badge b-blue">→ max km/ngày: 35km</span>
+    </div>
+  </div>
+</div>
+
+<div class="connector"><div class="connector-line"></div></div>
+
+<div class="stage" id="s2" onclick="toggle('s2')">
+  <div class="stage-header">
+    <div class="stage-num" style="background:#EEEDFE;color:#3C3489">2</div>
+    <div class="stage-title">Conversational elicitation — khai thác vibe ngầm</div>
+    <div class="stage-meta">1 câu tình huống · tự nhiên</div>
+    <i class="ti ti-chevron-down" style="font-size:16px;color:var(--color-text-secondary)" aria-hidden="true"></i>
+  </div>
+  <div class="stage-body">
+    <div style="font-size:13px;color:var(--color-text-secondary);margin-bottom:10px">Thay vì hỏi "bạn thích gì?", Agent đặt một câu tình huống. Câu trả lời tự nhiên của người dùng sẽ được embed thành <span style="font-family:var(--font-mono);font-size:12px">query_vector</span> cho cả hai không gian <span class="badge b-coral">vibe</span> và <span class="badge b-blue">logistics</span>.</div>
+    <div class="chat-wrap">
+      <div class="bubble bubble-agent">Một câu cuối để mình hiểu gu của bạn — bạn hình dung ngày đầu tiên ở Gia Lai như thế nào?<br><br>
+        <div class="chip-row">
+          <div class="chip sel">Dấn thân vào thiên nhiên, leo thác, trekking rừng nguyên sinh</div>
+          <div class="chip">Thong thả dạo chùa, ngắm hồ, chụp ảnh nhẹ nhàng</div>
+          <div class="chip">Khám phá văn hoá bản địa Jrai, thử ẩm thực đường phố</div>
+          <div class="chip">Tự mô tả...</div>
+        </div>
+      </div>
+      <div class="bubble bubble-user">Dấn thân vào thiên nhiên, leo thác, trekking rừng nguyên sinh</div>
+    </div>
+    <div style="margin-top:12px;font-size:12px;color:var(--color-text-secondary);margin-bottom:6px">Agent xử lý phía backend:</div>
+    <div style="background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:10px 12px;font-family:var(--font-mono);font-size:11px;line-height:1.8;color:var(--color-text-secondary)">embed("Dấn thân vào thiên nhiên, leo thác, trekking rừng nguyên sinh")<br>→ query_vector["vibe"]     → ưu tiên: Thác K50, Phú Cường, VQG Kon Ka Kinh<br>→ query_vector["logistics"] → chấp nhận: Medium intensity<br>→ combine với must_filter: intensity ≤ Medium, km/ngày ≤ 35</div>
+  </div>
+</div>
+
+<div class="connector"><div class="connector-line"></div></div>
+
+<div class="stage" id="s3" onclick="toggle('s3')">
+  <div class="stage-header">
+    <div class="stage-num" style="background:#E1F5EE;color:#085041">3</div>
+    <div class="stage-title">Planner Agent — sinh itinerary ban đầu</div>
+    <div class="stage-meta">Qdrant search + LLM sắp xếp</div>
+    <i class="ti ti-chevron-down" style="font-size:16px;color:var(--color-text-secondary)" aria-hidden="true"></i>
+  </div>
+  <div class="stage-body">
+    <div style="font-size:13px;color:var(--color-text-secondary);margin-bottom:10px">Agent chạy Qdrant query → lấy top POIs → Code Validator tính khoảng cách và ngân sách từ payload → LLM sắp xếp thứ tự hợp lý theo địa lý.</div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:4px;margin-bottom:12px">
+      <div class="node-box" style="background:#EEEDFE;border-color:#AFA9EC;color:#3C3489">Qdrant search (vibe + logistics, must filter)</div>
+      <div class="connector"><div class="connector-line"></div></div>
+      <div class="node-box">Top 8 POIs + payload (lat/lng, ticket, intensity)</div>
+      <div class="connector"><div class="connector-line"></div></div>
+      <div class="node-box" style="background:#E1F5EE;border-color:#9FE1CB;color:#085041">Code Validator: haversine clustering, budget check</div>
+      <div class="connector"><div class="connector-line"></div></div>
+      <div class="node-box" style="background:#E6F1FB;border-color:#85B7EB;color:#0C447C">LLM Planner: sắp xếp thứ tự, thêm gợi ý ẩm thực</div>
+    </div>
+    <div style="font-size:12px;color:var(--color-text-secondary);margin-bottom:8px">Itinerary đầu ra:</div>
+    <div class="itin-day">
+      <div class="itin-day-title"><i class="ti ti-calendar" aria-hidden="true" style="font-size:14px;vertical-align:-2px;margin-right:6px"></i>Ngày 1 — Pleiku + Chư Sê (28km)</div>
+      <div class="itin-stop"><div class="itin-dot" style="background:#1D9E75"></div><div><div style="font-weight:500">Sáng · Biển Hồ Chè</div><div style="color:var(--color-text-secondary);font-size:12px">7km từ TT · Miễn phí · Low intensity</div></div></div>
+      <div class="itin-stop"><div class="itin-dot" style="background:#1D9E75"></div><div><div style="font-weight:500">Trưa · Hàng thông trăm tuổi</div><div style="color:var(--color-text-secondary);font-size:12px">12km · Miễn phí · Low intensity · ăn trưa gần đó</div></div></div>
+      <div class="itin-stop"><div class="itin-dot" style="background:#EF9F27"></div><div><div style="font-weight:500">Chiều · Thác Phú Cường</div><div style="color:var(--color-text-secondary);font-size:12px">45km · 30.000đ · Medium intensity</div></div></div>
+    </div>
+    <div class="itin-day">
+      <div class="itin-day-title"><i class="ti ti-calendar" aria-hidden="true" style="font-size:14px;vertical-align:-2px;margin-right:6px"></i>Ngày 2 — Pleiku (nội thành)</div>
+      <div class="itin-stop"><div class="itin-dot" style="background:#1D9E75"></div><div><div style="font-weight:500">Sáng · Chùa Minh Thành</div><div style="color:var(--color-text-secondary);font-size:12px">2km · Miễn phí · Low intensity</div></div></div>
+      <div class="itin-stop"><div class="itin-dot" style="background:#1D9E75"></div><div><div style="font-weight:500">Chiều · Làng văn hoá Plei Ốp</div><div style="color:var(--color-text-secondary);font-size:12px">Trung tâm · Miễn phí · Low intensity</div></div></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+      <span class="badge b-gray">Tổng vé: 30.000đ</span>
+      <span class="badge b-gray">Max km/ngày: 28km ≤ 35km ✓</span>
+      <span class="badge b-teal">Validator: passed</span>
+    </div>
+  </div>
+</div>
+
+<div class="connector"><div class="connector-line"></div></div>
+
+<div class="stage" id="s4" onclick="toggle('s4')">
+  <div class="stage-header">
+    <div class="stage-num" style="background:#FAEEDA;color:#633806">4</div>
+    <div class="stage-title">Reflection Loop — chỉnh sửa theo phản hồi</div>
+    <div class="stage-meta">Critic + Re-planner · không hỏi lại câu cũ</div>
+    <i class="ti ti-chevron-down" style="font-size:16px;color:var(--color-text-secondary)" aria-hidden="true"></i>
+  </div>
+  <div class="stage-body">
+    <div style="font-size:13px;color:var(--color-text-secondary);margin-bottom:10px">Khi người dùng chê, Critic Agent phân tích lỗi từ Working Memory, đưa ra 2 lựa chọn định hướng cụ thể thay vì hỏi lại từ đầu.</div>
+    <div class="chat-wrap">
+      <div class="edit-bubble">Ngày 1 đi xa quá, chiều còn phải chạy 45km đến Thác Phú Cường, mệt lắm.</div>
+      <div class="agent-fix">
+        Mình hiểu rồi — chặng Pleiku → Thác Phú Cường thêm vào buổi chiều hơi nặng cho xe máy. Bạn muốn mình điều chỉnh theo hướng nào?<br><br>
+        <div class="chip-row">
+          <div class="chip">Giữ Thác Phú Cường nhưng chuyển sang ngày 2, ngày 1 chỉ quanh Pleiku</div>
+          <div class="chip">Bỏ Thác Phú Cường, thay bằng điểm khác gần hơn trong 35km</div>
+        </div>
+        <div class="fix-highlight"><i class="ti ti-info-circle" style="font-size:12px;vertical-align:-1px;margin-right:4px" aria-hidden="true"></i>Ghi nhận: không gộp Pleiku + Chư Sê trong cùng 1 ngày khi đi xe máy</div>
+      </div>
+    </div>
+    <div style="margin-top:10px;font-size:12px;color:var(--color-text-secondary);margin-bottom:6px">Episodic Memory cập nhật:</div>
+    <div style="background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:8px 12px;font-family:var(--font-mono);font-size:11px;line-height:1.8;color:var(--color-text-secondary)">
+      {<br>
+      &nbsp;&nbsp;event: "user_rejected_itinerary",<br>
+      &nbsp;&nbsp;reason_tag: "distance_overload",<br>
+      &nbsp;&nbsp;rejected_segment: "Pleiku → Chư Sê same day (motorbike)",<br>
+      &nbsp;&nbsp;session_id: "sess_001"<br>
+      }
+    </div>
+  </div>
+</div>
+
+</div>
+
+<script>
+function toggle(id){
+  const el=document.getElementById(id);
+  const wasActive=el.classList.contains('active');
+  document.querySelectorAll('.stage').forEach(s=>s.classList.remove('active'));
+  if(!wasActive) el.classList.add('active');
+}
+document.querySelectorAll('.chip').forEach(c=>{
+  c.addEventListener('click',function(e){
+    e.stopPropagation();
+    const row=this.closest('.chip-row');
+    if(row){row.querySelectorAll('.chip').forEach(x=>x.classList.remove('sel'));this.classList.add('sel');}
+  });
+});
+</script>

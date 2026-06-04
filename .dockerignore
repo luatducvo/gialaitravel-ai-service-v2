@@ -1,0 +1,21 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.venv/
+.python-version
+
+# IDEs
+.vscode/
+.idea/
+.gemini/
+
+# Project files
+logs/
+.env
