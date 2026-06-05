@@ -6,6 +6,7 @@ from enum import Enum
 from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+from src.domain.itinerary import Itinerary
 
 
 class GroupType(str, Enum):
@@ -70,26 +71,14 @@ class PoiInput(BaseModel):
 class CustomItineraryRequest(BaseModel):
     """Request body cho POST /api/v1/itineraries/custom."""
 
-    pois: List[PoiInput] = Field(
-        ..., min_length=1, max_length=20, description="Danh sách POI đã chọn (1-20)"
+    poi_names: List[str] = Field(
+        ..., min_length=1, max_length=20, description="Danh sách tên POI đã chọn (1-20)"
     )
-    duration: str = Field(
-        ...,
-        min_length=1,
-        max_length=50,
-        description="Thời lượng chuyến đi, ví dụ: '1 ngày', '2 ngày 1 đêm'",
-    )
-    group: GroupType = Field(..., description="Loại nhóm du lịch")
-    transport: TransportType = Field(..., description="Phương tiện di chuyển")
-    note: Optional[str] = Field(None, max_length=500, description="Ghi chú thêm từ user")
-    start_location: Optional[PoiInput] = Field(None, description="Điểm xuất phát (khách sạn)")
-    optimize_route: bool = Field(True, description="Tối ưu thứ tự POI hay giữ nguyên?")
 
     @model_validator(mode="after")
-    def check_unique_poi_ids(self) -> "CustomItineraryRequest":
-        ids = [p.poi_id for p in self.pois]
-        if len(ids) != len(set(ids)):
-            raise ValueError("Danh sách POI chứa poi_id trùng lặp")
+    def check_unique_poi_names(self) -> "CustomItineraryRequest":
+        if len(self.poi_names) != len(set(self.poi_names)):
+            raise ValueError("Danh sách tên POI chứa tên trùng lặp")
         return self
 
 
@@ -128,7 +117,7 @@ class OptimizedPoiItem(BaseModel):
 class CustomItineraryResponse(BaseModel):
     """Response data cho itinerary đã tạo."""
 
-    itinerary: dict = Field(..., description="Lịch trình chi tiết (days → activities)")
+    itinerary: Itinerary = Field(..., description="Lịch trình chi tiết (days → activities)")
     route_summary: RouteSummaryResponse = Field(..., description="Thống kê tối ưu route")
     optimized_poi_order: List[OptimizedPoiItem] = Field(
         ...,
