@@ -8,21 +8,21 @@ Version: 1.0
 
 # 1. Project Scope
 
-## Mục tiêu
+## Objectives
 
-Xây dựng hệ thống AI hỗ trợ tạo lịch trình du lịch tại Gia Lai.
+Build an AI-powered travel itinerary planner system for Gia Lai.
 
-User có thể:
+Users can:
 
-* Chọn sở thích du lịch
-* Chọn địa điểm yêu thích
-* Sinh itinerary bằng AI
-* Chỉnh sửa itinerary
-* Re-plan itinerary bằng AI
+* Select travel preferences
+* Select favorite locations
+* Generate itinerary using AI
+* Edit itinerary
+* Re-plan itinerary using AI
 
-## Chưa làm trong MVP
+## Out of Scope for MVP
 
-Không sử dụng:
+Do not use:
 
 * Embedding
 * Vector Database
@@ -51,34 +51,36 @@ PostgreSQL         Agent Service
                  LangGraph + LLM
 ```
 
-## Trách nhiệm
+## Responsibilities
 
 ### Frontend
 
-* Thu thập thông tin từ user
-* Hiển thị itinerary
-* Cho phép chỉnh sửa itinerary
+* Collect user preferences
+* Display itinerary
+* Allow editing the itinerary
 
 ### Backend
 
-* Quản lý dữ liệu
-* Validate request
-* Tính điểm location
-* Gọi Agent
-* Lưu itinerary
+* Manage data
+* Validate requests
+* Score locations
+* Call Agent
+* Save itineraries
 
 ### Agent
 
-* Hiểu sở thích user
-* Tạo lịch trình
-* Giải thích recommendation
-* Re-plan itinerary
+* Understand user preferences
+* Generate itineraries
+* Explain recommendations
+* Re-plan itineraries
 
-Agent không được:
+Agent is not allowed to:
 
-* Truy cập database
+* Access database
 * Query PostgreSQL
-* Tự tạo địa điểm mới
+* Query Qdrant or resolve selected locations by itself
+* Create new locations on its own
+* Add, replace, or invent user-selected locations
 
 ---
 
@@ -107,7 +109,7 @@ model User {
 
 ## Location
 
-Nguồn dữ liệu địa điểm chính.
+Main location data source.
 
 ```prisma
 model Location {
@@ -162,7 +164,7 @@ model Location {
 
 ## Trip
 
-Một kế hoạch du lịch.
+A travel plan.
 
 ```prisma
 model Trip {
@@ -276,7 +278,7 @@ model TripStop {
 
 ## AgentRun
 
-Lưu lịch sử Agent.
+Save Agent run history.
 
 ```prisma
 model AgentRun {
@@ -356,46 +358,46 @@ enum PriceRange {
 
 ## Step 1
 
-### Thời gian du lịch
+### Trip Duration
 
 ```text
-Bạn dự định đi trong bao lâu?
+How long do you plan to travel?
 ```
 
 Options:
 
-* 1 ngày
-* 2 ngày 1 đêm
-* 3 ngày 2 đêm
-* 4 ngày 3 đêm
-* Tùy chỉnh
+* 1 day
+* 2 days 1 night
+* 3 days 2 nights
+* 4 days 3 nights
+* Custom
 
 ---
 
 ## Step 2
 
-### Sở thích
+### Preferences
 
 ```text
-Bạn thích trải nghiệm nào?
+Which experiences do you prefer?
 ```
 
 Multi Select:
 
-* Thiên nhiên
-* Thác nước
-* Núi đồi
-* Biển hồ
-* Cafe
-* Ẩm thực
-* Văn hóa
-* Lịch sử
-* Tâm linh
-* Check-in
-* Thư giãn
-* Khám phá
-* Gia đình
-* Cặp đôi
+* Nature
+* Waterfalls
+* Hills & Mountains
+* Lakes & Seas
+* Coffee
+* Cuisine
+* Culture
+* History
+* Spirituality
+* Sightseeing / Check-in
+* Relaxation
+* Exploration
+* Family
+* Couples
 
 Frontend:
 
@@ -413,61 +415,61 @@ Frontend:
 
 ## Step 3
 
-### Địa điểm yêu thích
+### Favorite Locations
 
 Optional
 
 ```text
-Có địa điểm nào bạn muốn đi không?
+Are there any specific locations you want to visit?
 ```
 
-Ví dụ:
+Examples:
 
-* Biển Hồ
-* Chùa Minh Thành
-* Chư Đăng Ya
-* Thác Phú Cường
+* Bien Ho (Lake)
+* Minh Thanh Pagoda
+* Chu Dang Ya (Volcano)
+* Phu Cuong Waterfall
 
 ---
 
 ## Step 4
 
-### Đi cùng ai?
+### Traveling with?
 
-* Một mình
-* Cặp đôi
-* Gia đình
-* Bạn bè
+* Solo
+* Couple
+* Family
+* Friends
 
 ---
 
 ## Step 5
 
-### Nhịp độ
+### Travel Pace
 
-* Nhẹ nhàng
-* Cân bằng
-* Khám phá nhiều
+* Slow / Relaxed
+* Balanced
+* Fast-paced / Active
 
 ---
 
 ## Step 6
 
-### Ngân sách
+### Budget
 
-* Tiết kiệm
-* Vừa phải
-* Thoải mái
+* Budget / Economic
+* Mid-range
+* Premium / Comfortable
 
 ---
 
 ## Step 7 (Optional)
 
-### Phương tiện
+### Transportation
 
-* Xe máy
-* Ô tô
-* Không quan trọng
+* Motorbike
+* Car
+* Doesn't matter
 
 Default:
 
@@ -485,7 +487,7 @@ Generate Itinerary
 
 # 6. Recommendation Logic MVP
 
-Không dùng AI ở bước tìm candidate.
+Do not use AI for the candidate discovery step.
 
 Backend:
 
@@ -505,7 +507,7 @@ Selected Location Boost
 Top Candidate Locations
 ```
 
-Ví dụ:
+Example:
 
 ```text
 +30 Selected Location
@@ -563,7 +565,7 @@ Persist AgentRun
 User:
 
 ```text
-Tối ưu lại lịch trình
+Optimize/Replan the itinerary
 ```
 
 Backend:
@@ -623,11 +625,76 @@ PATCH /trips/:tripId/days/:dayId/stops/reorder
 POST /trips/:tripId/replan
 ```
 
+## Internal Agent API
+
+NestJS Backend calls the FastAPI Agent Service after it validates locations and
+loads POI snapshots from PostgreSQL.
+
+```http
+POST /api/v1/itineraries/custom
+```
+
+Request:
+
+```json
+{
+  "duration": "2 ngày 1 đêm",
+  "group": "friends",
+  "transport": "motorbike",
+  "travelPace": "balanced",
+  "budgetLevel": "mid_range",
+  "vibe": "Ưu tiên thiên nhiên, cà phê và văn hóa",
+  "constraints": ["Chỉ dùng các địa điểm trong selectedPois"],
+  "optimizeRoute": true,
+  "selectedPois": [
+    {
+      "poiId": "loc_bien_ho",
+      "poiName": "Biển Hồ",
+      "description": "Hồ nước nổi tiếng gần Pleiku",
+      "lat": 13.997,
+      "lng": 108.006,
+      "category": "attraction",
+      "tags": ["nature", "sightseeing"],
+      "estimatedCost": 0,
+      "durationMinutes": 90,
+      "intensityLevel": "low",
+      "imageUrl": "https://example.com/bien-ho.jpg"
+    }
+  ]
+}
+```
+
+Response:
+
+```json
+{
+  "status_code": 200,
+  "message": "Lich trinh da duoc tao thanh cong",
+  "data": {
+    "itinerary": {},
+    "route_summary": {
+      "estimated_km": 86.2,
+      "optimizer": "nearest_neighbor",
+      "distance_source": "haversine_road_estimate",
+      "total_pois": 3
+    },
+    "optimized_poi_order": []
+  }
+}
+```
+
+Rules:
+
+* Agent Service must only use `selectedPois`.
+* Agent Service must not query Qdrant or PostgreSQL for this REST flow.
+* Agent Service must not replace missing POIs with random fallback locations.
+* `optimizeRoute=false` keeps the user-provided POI order.
+
 ---
 
 # 10. Phase 2 Roadmap
 
-Sau MVP:
+Post MVP / Phase 2:
 
 * Embedding
 * Qdrant
@@ -638,6 +705,3 @@ Sau MVP:
 * Collaborative Filtering
 * Route Optimization
 * Maps API Integration
-
-```
-```

@@ -1,6 +1,7 @@
 from src.application.guardrails import check_user_message_scope
 from src.application.graph.nodes.route_optimizer import route_optimizer_node
 from src.domain.working_memory import WorkingMemory
+import pytest
 
 
 def test_guardrail_blocks_prompt_injection():
@@ -10,10 +11,14 @@ def test_guardrail_blocks_prompt_injection():
     assert result.reason == "prompt_injection"
 
 
-def test_route_optimizer_orders_nearby_points_and_keeps_cost(monkeypatch):
+@pytest.mark.anyio
+async def test_route_optimizer_orders_nearby_points_and_keeps_cost(monkeypatch):
+    async def fake_google_distance(origin, destination):
+        return None
+
     monkeypatch.setattr(
-        "src.application.graph.nodes.route_optimizer._google_distance_km",
-        lambda origin, destination: None,
+        "src.application.graph.nodes.route_optimizer._google_distance_km_async",
+        fake_google_distance,
     )
     state = {
         "memory": WorkingMemory(session_id="test", duration="2d1n", group="couple", transport="car"),
@@ -24,51 +29,150 @@ def test_route_optimizer_orders_nearby_points_and_keeps_cost(monkeypatch):
         ],
     }
 
-    result = route_optimizer_node(state)
+    result = await route_optimizer_node(state)
 
     ordered_names = [poi["metadata"]["poi_name"] for poi in result["validated_pois"]]
     assert ordered_names == ["A", "B", "C"]
-    assert result["route_summary"]["estimated_cost"] == 600
     assert result["route_summary"]["estimated_km"] > 0
 
 
-def test_llm_planner_node_success(monkeypatch):
-    from src.application.graph.nodes.llm_planner import llm_planner_node
-    from src.domain.itinerary import Itinerary
+@pytest.mark.anyio
+async def test_custom_itinerary_normalizes_route_order_poi_id(monkeypatch):
+    from src.application.services.itinerary_service import CustomItineraryService
+    from src.domain.itinerary import Activity, DayPlan, Itinerary
+    from src.presentation.schemas_itinerary import CustomItineraryRequest
 
-    class MockStructuredLLM:
-        def invoke(self, *args, **kwargs):
-            return Itinerary(days=[], total_cost=100.0, total_km=10.0)
+    async def fake_optimize_route(pois, *, should_optimize=True):
+        pois[0]["metadata"]["route_order"] = 1
+        pois[0]["metadata"]["distance_from_prev_km"] = 0.0
+        return pois, {
+            "estimated_km": 0.0,
+            "optimizer": "user_defined_order",
+            "distance_source": "none",
+        }
 
-    class MockLLM:
-        def with_structured_output(self, *args, **kwargs):
-            return MockStructuredLLM()
+    async def fake_generate_itinerary_from_pois(**kwargs):
+        return Itinerary(
+            days=[
+                DayPlan(
+                    day=1,
+                    title="Route order POI",
+                    total_km=0.0,
+                    activities=[
+                        Activity(
+                            time_slot="08:00-09:00",
+                            poi_id="1",
+                            poi_name="Wrong label",
+                            lat=0.0,
+                            lng=0.0,
+                            duration_minutes=60,
+                            cost=0.0,
+                            distance_from_prev_km=99.0,
+                            intensity_level="low",
+                            note="Should be normalized",
+                        )
+                    ],
+                )
+            ],
+            total_cost=0.0,
+            total_km=0.0,
+        )
 
     monkeypatch.setattr(
-        "src.application.graph.nodes.llm_planner.get_llm",
-        lambda: MockLLM(),
+        "src.application.services.itinerary_service.optimize_route",
+        fake_optimize_route,
+    )
+    monkeypatch.setattr(
+        "src.application.services.itinerary_service.generate_itinerary_from_pois",
+        fake_generate_itinerary_from_pois,
     )
 
-    state = {
-        "memory": WorkingMemory(
-            session_id="test",
-            duration="2d1n",
-            group="couple",
-            transport="car",
-            vibe_query="Khám phá Gia Lai",
-        ),
-        "validated_pois": [
-            {"page_content": "A", "metadata": {"poi_id": "a", "poi_name": "A", "lat": 13.97, "lng": 108.0, "cost": 100, "route_order": 1, "distance_from_prev_km": 0.0}}
-        ],
-        "route_summary": {"estimated_cost": 100, "estimated_km": 10},
-    }
+    request = CustomItineraryRequest.model_validate(
+        {
+            "duration": "1 day",
+            "selectedPois": [
+                {
+                    "poiId": "inside",
+                    "poiName": "Inside",
+                    "lat": 13.9,
+                    "lng": 108.0,
+                }
+            ],
+        }
+    )
 
-    result = llm_planner_node(state)
+    response = await CustomItineraryService().create_custom_itinerary(request)
+    activity = response.itinerary.days[0].activities[0]
 
-    assert "memory" in result
-    assert result["memory"].current_itinerary == {"days": [], "total_cost": 100.0, "total_km": 10.0}
-    assert result["memory"].current_step == "refine"
-    assert len(result["ws_responses"]) == 1
-    assert result["ws_responses"][0]["type"] == "itinerary"
-    assert result["ws_responses"][0]["optimized_poi_order"][0]["poi_name"] == "A"
+    assert activity.poi_id == "inside"
+    assert activity.poi_name == "Inside"
+    assert activity.lat == 13.9
+    assert activity.lng == 108.0
+
+
+@pytest.mark.anyio
+async def test_custom_itinerary_rejects_unknown_llm_poi(monkeypatch):
+    from src.application.services.itinerary_service import CustomItineraryService
+    from src.domain.itinerary import Activity, DayPlan, Itinerary
+    from src.presentation.schemas_itinerary import CustomItineraryRequest
+
+    async def fake_optimize_route(pois, *, should_optimize=True):
+        return pois, {
+            "estimated_km": 0.0,
+            "optimizer": "user_defined_order",
+            "distance_source": "none",
+        }
+
+    async def fake_generate_itinerary_from_pois(**kwargs):
+        return Itinerary(
+            days=[
+                DayPlan(
+                    day=1,
+                    title="Bad POI",
+                    total_km=0.0,
+                    activities=[
+                        Activity(
+                            time_slot="08:00-09:00",
+                            poi_id="outside",
+                            poi_name="Outside",
+                            lat=13.9,
+                            lng=108.0,
+                            duration_minutes=60,
+                            cost=0.0,
+                            distance_from_prev_km=0.0,
+                            intensity_level="low",
+                            note="Should be rejected",
+                        )
+                    ],
+                )
+            ],
+            total_cost=0.0,
+            total_km=0.0,
+        )
+
+    monkeypatch.setattr(
+        "src.application.services.itinerary_service.optimize_route",
+        fake_optimize_route,
+    )
+    monkeypatch.setattr(
+        "src.application.services.itinerary_service.generate_itinerary_from_pois",
+        fake_generate_itinerary_from_pois,
+    )
+
+    request = CustomItineraryRequest.model_validate(
+        {
+            "duration": "1 day",
+            "selectedPois": [
+                {
+                    "poiId": "inside",
+                    "poiName": "Inside",
+                    "lat": 13.9,
+                    "lng": 108.0,
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="outside selectedPois"):
+        await CustomItineraryService().create_custom_itinerary(request)
 

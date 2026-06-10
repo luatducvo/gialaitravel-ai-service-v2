@@ -5,7 +5,8 @@ from __future__ import annotations
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
 from src.domain.itinerary import Itinerary
 
 
@@ -29,100 +30,146 @@ class IntensityLevel(str, Enum):
     high = "high"
 
 
-# ---------------------------------------------------------------------------
-# Request schemas
-# ---------------------------------------------------------------------------
+class TravelPace(str, Enum):
+    slow = "slow"
+    balanced = "balanced"
+    fast = "fast"
+
+
+class BudgetLevel(str, Enum):
+    budget = "budget"
+    mid_range = "mid_range"
+    premium = "premium"
+
 
 class PoiInput(BaseModel):
-    """Một địa điểm user chọn từ frontend."""
+    """A POI snapshot selected and validated by the backend."""
 
-    poi_id: str = Field(..., description="ID duy nhất của POI (từ Qdrant hoặc frontend)")
-    poi_name: str = Field(..., min_length=1, max_length=200, description="Tên hiển thị")
-    lat: float = Field(..., description="Vĩ độ (latitude)")
-    lng: float = Field(..., description="Kinh độ (longitude)")
-    description: Optional[str] = Field(None, max_length=500, description="Mô tả ngắn")
+    model_config = ConfigDict(populate_by_name=True)
+
+    poi_id: str = Field(..., alias="poiId", description="Unique POI/location ID from the backend")
+    poi_name: str = Field(..., alias="poiName", min_length=1, max_length=200, description="Display name")
+    lat: float = Field(..., description="Latitude")
+    lng: float = Field(..., description="Longitude")
+    description: Optional[str] = Field(None, max_length=500, description="Short description")
     category: Optional[str] = Field(
         None,
         max_length=50,
-        description="Loại: restaurant, attraction, hotel, cafe, waterfall, ...",
+        description="Type: restaurant, attraction, hotel, cafe, waterfall, ...",
     )
-    estimated_cost: Optional[float] = Field(0.0, ge=0, description="Chi phí ước tính (VND)")
-    duration_minutes: Optional[int] = Field(60, ge=10, le=480, description="Thời gian tham quan (phút)")
+    tags: List[str] = Field(default_factory=list, max_length=20, description="Backend-provided tags")
+    estimated_cost: Optional[float] = Field(
+        0.0,
+        alias="estimatedCost",
+        ge=0,
+        description="Estimated cost in VND",
+    )
+    duration_minutes: Optional[int] = Field(
+        60,
+        alias="durationMinutes",
+        ge=10,
+        le=480,
+        description="Estimated visit duration in minutes",
+    )
     intensity_level: Optional[IntensityLevel] = Field(
-        IntensityLevel.medium, description="Mức độ vận động: low / medium / high"
+        IntensityLevel.medium,
+        alias="intensityLevel",
+        description="Activity intensity: low / medium / high",
     )
-    image_url: Optional[str] = Field(None, description="URL ảnh đại diện")
+    image_url: Optional[str] = Field(
+        None,
+        alias="imageUrl",
+        description="Representative image URL",
+    )
 
     @field_validator("lat")
     @classmethod
-    def validate_lat(cls, v: float) -> float:
-        if not (13.0 <= v <= 15.0):
-            raise ValueError(f"Latitude {v} nằm ngoài vùng Gia Lai (13.0 – 15.0)")
-        return v
+    def validate_lat(cls, value: float) -> float:
+        if not (13.0 <= value <= 15.0):
+            raise ValueError(f"Latitude {value} is outside Gia Lai bounds (13.0-15.0)")
+        return value
 
     @field_validator("lng")
     @classmethod
-    def validate_lng(cls, v: float) -> float:
-        if not (107.0 <= v <= 109.5):
-            raise ValueError(f"Longitude {v} nằm ngoài vùng Gia Lai (107.0 – 109.5)")
-        return v
+    def validate_lng(cls, value: float) -> float:
+        if not (107.0 <= value <= 109.5):
+            raise ValueError(f"Longitude {value} is outside Gia Lai bounds (107.0-109.5)")
+        return value
 
 
 class CustomItineraryRequest(BaseModel):
-    """Request body cho POST /api/v1/itineraries/custom."""
+    """Request body for POST /api/v1/itineraries/custom."""
 
-    poi_names: List[str] = Field(
-        ..., min_length=1, max_length=20, description="Danh sách tên POI đã chọn (1-20)"
+    model_config = ConfigDict(populate_by_name=True)
+
+    duration: str = Field(..., min_length=1, max_length=50, description="Trip duration label")
+    group: GroupType = Field(GroupType.friends, description="Traveler group type")
+    transport: TransportType = Field(TransportType.motorbike, description="Transport type")
+    travel_pace: TravelPace = Field(
+        TravelPace.balanced,
+        alias="travelPace",
+        description="Preferred travel pace",
+    )
+    budget_level: BudgetLevel = Field(
+        BudgetLevel.mid_range,
+        alias="budgetLevel",
+        description="Budget preference",
+    )
+    vibe: Optional[str] = Field(None, max_length=500, description="User travel vibe or preference text")
+    constraints: List[str] = Field(default_factory=list, max_length=20, description="Known constraints")
+    optimize_route: bool = Field(
+        True,
+        alias="optimizeRoute",
+        description="Optimize POI order when true; keep user order when false",
+    )
+    selected_pois: List[PoiInput] = Field(
+        ...,
+        alias="selectedPois",
+        min_length=1,
+        max_length=20,
+        description="POI snapshots selected and validated by the backend",
     )
 
     @model_validator(mode="after")
-    def check_unique_poi_names(self) -> "CustomItineraryRequest":
-        if len(self.poi_names) != len(set(self.poi_names)):
-            raise ValueError("Danh sách tên POI chứa tên trùng lặp")
+    def check_unique_poi_ids(self) -> "CustomItineraryRequest":
+        poi_ids = [poi.poi_id for poi in self.selected_pois]
+        if len(poi_ids) != len(set(poi_ids)):
+            raise ValueError("selectedPois contains duplicate poiId values")
         return self
 
 
-# ---------------------------------------------------------------------------
-# Response schemas
-# ---------------------------------------------------------------------------
-
 class RouteSummaryResponse(BaseModel):
-    """Tóm tắt route đã tối ưu."""
+    """Route optimization summary."""
 
-    estimated_km: float = Field(..., description="Tổng km ước tính")
-    optimizer: str = Field(..., description="Thuật toán đã dùng")
+    estimated_km: float = Field(..., description="Estimated total route distance in km")
+    optimizer: str = Field(..., description="Optimizer used")
     distance_source: str = Field(
         "none",
-        description=(
-            "Nguồn dữ liệu khoảng cách: 'google_maps' | 'haversine_road_estimate' "
-            "| 'mixed' | 'none'"
-        ),
+        description="Distance source: google_maps | haversine_road_estimate | mixed | none",
     )
-    total_pois: int = Field(..., description="Số POI trong itinerary")
+    total_pois: int = Field(..., description="Number of POIs in the itinerary")
 
 
 class OptimizedPoiItem(BaseModel):
-    """Một POI trong danh sách thứ tự tuyến đường đã tối ưu."""
+    """A POI item in the optimized route order."""
 
-    poi_id: str = Field(..., description="ID duy nhất của POI")
-    poi_name: str = Field(..., description="Tên hiển thị")
-    lat: Optional[float] = Field(None, description="Vĩ độ")
-    lng: Optional[float] = Field(None, description="Kinh độ")
-    route_order: int = Field(..., description="Thứ tự trong tuyến đường (bắt đầu từ 1)")
+    poi_id: str = Field(..., description="Unique POI/location ID")
+    poi_name: str = Field(..., description="Display name")
+    lat: Optional[float] = Field(None, description="Latitude")
+    lng: Optional[float] = Field(None, description="Longitude")
+    route_order: int = Field(..., description="Route order, starting from 1")
     distance_from_prev_km: float = Field(
-        0.0, description="Khoảng cách đường bộ từ POI trước (km); 0 với điểm đầu tiên"
+        0.0,
+        description="Road distance from the previous POI in km; 0 for the first item",
     )
 
 
 class CustomItineraryResponse(BaseModel):
-    """Response data cho itinerary đã tạo."""
+    """Response data for a generated itinerary."""
 
-    itinerary: Itinerary = Field(..., description="Lịch trình chi tiết (days → activities)")
-    route_summary: RouteSummaryResponse = Field(..., description="Thống kê tối ưu route")
+    itinerary: Itinerary = Field(..., description="Detailed itinerary")
+    route_summary: RouteSummaryResponse = Field(..., description="Route optimization statistics")
     optimized_poi_order: List[OptimizedPoiItem] = Field(
         ...,
-        description=(
-            "Thứ tự POI sau tối ưu kèm tọa độ — dùng để render marker + polyline trên bản đồ. "
-            "Kiểm tra route_summary.optimizer để biết có tối ưu hay không."
-        ),
+        description="Optimized POI order for rendering markers and polylines on the map",
     )

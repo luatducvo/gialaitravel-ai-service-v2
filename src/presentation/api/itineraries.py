@@ -22,11 +22,12 @@ router = APIRouter(prefix="/api/v1/itineraries", tags=["itineraries"])
         422: {"model": ErrorResponse, "description": "Validation Error"},
         500: {"model": ErrorResponse, "description": "Internal Server Error"},
     },
-    summary="Tạo lịch trình tối ưu từ danh sách POI tự chọn",
+    summary="Create itinerary from backend-selected POI snapshots",
     description=(
-        "Nhận danh sách địa điểm (POI) user tự chọn từ frontend, "
-        "tối ưu thứ tự tham quan bằng nearest-neighbor + Google Maps, "
-        "sau đó gọi LLM để sinh lịch trình chi tiết."
+        "Internal Agent API for NestJS Backend. Receives POI snapshots that the "
+        "backend already validated from PostgreSQL, optionally optimizes route "
+        "order, then calls the LLM planner. This endpoint does not query Qdrant, "
+        "does not access the database, and does not replace selected POIs."
     ),
 )
 async def create_custom_itinerary(
@@ -37,7 +38,7 @@ async def create_custom_itinerary(
         result = await service.create_custom_itinerary(request)
         return BaseResponse(
             data=result,
-            message="Lịch trình đã được tạo thành công",
+            message="Lich trinh da duoc tao thanh cong",
         )
     except Exception as exc:
         logger.error(f"Error creating custom itinerary: {exc}")
@@ -45,7 +46,7 @@ async def create_custom_itinerary(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=ErrorResponse(
                 status_code=500,
-                message="Không thể tạo lịch trình",
+                message="Khong the tao lich trinh",
                 details=str(exc),
             ).model_dump(),
         )
