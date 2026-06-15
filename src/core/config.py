@@ -1,8 +1,11 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import AliasChoices, Field
 from typing import Optional
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "gialaitravel-ai-service-v2"
+    APP_HOST: str = "0.0.0.0"
+    APP_PORT: int = Field(8000, validation_alias=AliasChoices("APP_PORT", "PORT"))
 
     
     # LLM Provider Configuration (openai, gemini, deepseek)
