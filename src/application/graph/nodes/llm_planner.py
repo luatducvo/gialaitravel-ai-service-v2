@@ -43,9 +43,6 @@ def get_llm():
     Returns:
         BaseChatModel: Instance của LLM client đã cấu hình.
     """
-
-
-def get_llm():
     provider = settings.LLM_PROVIDER.lower()
     if provider == "gemini":
         return ChatGoogleGenerativeAI(
@@ -85,9 +82,12 @@ def _build_context(pois: list[dict]) -> str:
     for index, result in enumerate(pois):
         metadata = result.get("metadata", {})
         route_order = metadata.get("route_order", index + 1)
+        day_number = metadata.get("day_number", 1)
+        day_route_order = metadata.get("day_route_order", route_order)
         poi_id = metadata.get("poi_id", "")
         lines.append(
-            f"- route_order={route_order}; poi_id={poi_id}; "
+            f"- day_number={day_number}; day_route_order={day_route_order}; "
+            f"route_order={route_order}; poi_id={poi_id}; "
             f"poi_name={metadata.get('poi_name', 'Unknown')}: {result.get('page_content', '')} "
             f"(cost: {metadata.get('cost', 0)}, "
             f"lat: {metadata.get('lat') or metadata.get('latitude')}, "

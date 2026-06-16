@@ -61,7 +61,11 @@ def _coordinate_from_metadata(metadata: Dict[str, Any]) -> Optional[Coordinate]:
         return None
 
 
-def _nearest_neighbor_order(pois: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _nearest_neighbor_order(
+    pois: List[Dict[str, Any]],
+    *,
+    start_location: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
     """Sắp xếp danh sách POI theo thuật toán Nearest Neighbor (greedy TSP).
 
     Bắt đầu từ POI đầu tiên, mỗi bước chọn POI chưa thăm gần nhất theo
@@ -75,11 +79,25 @@ def _nearest_neighbor_order(pois: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     Returns:
         Danh sách POI đã sắp xếp. Nếu có ít hơn 3 POI trả về bản copy.
     """
-    if len(pois) < 3:
+    if len(pois) < 3 and not start_location:
         return list(pois)
 
     remaining = list(pois)
-    ordered = [remaining.pop(0)]
+    start_coord = None
+    if start_location:
+        start_coord = _coordinate_from_metadata(start_location.get("metadata", {}))
+
+    if start_coord:
+        next_index = min(
+            range(len(remaining)),
+            key=lambda idx: _distance_for_sort(
+                start_coord,
+                _coordinate_from_metadata(remaining[idx].get("metadata", {})),
+            ),
+        )
+        ordered = [remaining.pop(next_index)]
+    else:
+        ordered = [remaining.pop(0)]
 
     while remaining:
         current_coord = _coordinate_from_metadata(ordered[-1].get("metadata", {}))
@@ -184,6 +202,7 @@ async def optimize_route(
     pois: List[Dict[str, Any]],
     *,
     should_optimize: bool = True,
+    start_location: Optional[Dict[str, Any]] = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Pure async function: sắp xếp thứ tự POI tối ưu và tính khoảng cách segment.
 
@@ -212,13 +231,21 @@ async def optimize_route(
         }
 
     # Sort phase — không mutate original
-    sorted_pois = _nearest_neighbor_order(pois) if should_optimize else list(pois)
+    sorted_pois = (
+        _nearest_neighbor_order(pois, start_location=start_location)
+        if should_optimize
+        else list(pois)
+    )
 
     # Deep-copy để hoàn toàn tách biệt với input
     ordered_pois: List[Dict[str, Any]] = [copy.deepcopy(p) for p in sorted_pois]
 
     total_km = 0.0
-    previous_coord: Optional[Coordinate] = None
+    previous_coord: Optional[Coordinate] = (
+        _coordinate_from_metadata(start_location.get("metadata", {}))
+        if start_location
+        else None
+    )
     distance_sources: List[str] = []
 
     for index, poi in enumerate(ordered_pois):

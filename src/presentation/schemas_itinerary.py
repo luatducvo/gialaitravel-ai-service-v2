@@ -122,6 +122,11 @@ class CustomItineraryRequest(BaseModel):
         alias="optimizeRoute",
         description="Optimize POI order when true; keep user order when false",
     )
+    start_location: Optional[PoiInput] = Field(
+        None,
+        alias="startLocation",
+        description="Optional hotel/current location used as the route start anchor",
+    )
     selected_pois: List[PoiInput] = Field(
         ...,
         alias="selectedPois",
@@ -158,6 +163,12 @@ class OptimizedPoiItem(BaseModel):
     lat: Optional[float] = Field(None, description="Latitude")
     lng: Optional[float] = Field(None, description="Longitude")
     route_order: int = Field(..., description="Route order, starting from 1")
+    day_number: int = Field(1, alias="dayNumber", description="Trip day assigned by the route planner")
+    day_route_order: int = Field(
+        1,
+        alias="dayRouteOrder",
+        description="Route order within the assigned trip day",
+    )
     distance_from_prev_km: float = Field(
         0.0,
         description="Road distance from the previous POI in km; 0 for the first item",

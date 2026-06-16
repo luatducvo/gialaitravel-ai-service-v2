@@ -10,11 +10,14 @@ __pycache__/
 .pytest_cache/
 .venv/
 .python-version
+.ruff_cache/
 
 # IDEs
 .vscode/
 .idea/
 .gemini/
+.agents/
+AGENTS.md
 
 # Project files
 logs/
