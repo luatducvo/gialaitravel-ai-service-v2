@@ -1,5 +1,5 @@
 from src.application.guardrails import check_user_message_scope
-from src.application.graph.nodes.route_optimizer import route_optimizer_node
+from src.application.graph.nodes.route_optimizer import optimize_route, route_optimizer_node
 from src.domain.working_memory import WorkingMemory
 import pytest
 
@@ -34,6 +34,32 @@ async def test_route_optimizer_orders_nearby_points_and_keeps_cost(monkeypatch):
     ordered_names = [poi["metadata"]["poi_name"] for poi in result["validated_pois"]]
     assert ordered_names == ["A", "B", "C"]
     assert result["route_summary"]["estimated_km"] > 0
+
+
+@pytest.mark.anyio
+async def test_route_optimizer_uses_global_tsp_optimizer(monkeypatch):
+    async def fake_google_distance(origin, destination):
+        return None
+
+    monkeypatch.setattr(
+        "src.application.graph.nodes.route_optimizer._google_distance_km_async",
+        fake_google_distance,
+    )
+
+    pois = [
+        {"page_content": "A", "metadata": {"poi_id": "a", "poi_name": "A", "lat": 13.90, "lng": 108.00}},
+        {"page_content": "C", "metadata": {"poi_id": "c", "poi_name": "C", "lat": 14.20, "lng": 108.30}},
+        {"page_content": "B", "metadata": {"poi_id": "b", "poi_name": "B", "lat": 13.91, "lng": 108.01}},
+        {"page_content": "D", "metadata": {"poi_id": "d", "poi_name": "D", "lat": 14.21, "lng": 108.31}},
+    ]
+
+    ordered, summary = await optimize_route(pois, should_optimize=True)
+
+    assert [poi["metadata"]["poi_id"] for poi in ordered] in (
+        ["a", "b", "c", "d"],
+        ["d", "c", "b", "a"],
+    )
+    assert summary["optimizer"].startswith("tsp_")
 
 
 @pytest.mark.anyio
@@ -178,7 +204,7 @@ async def test_custom_itinerary_rejects_unknown_llm_poi(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_custom_itinerary_groups_pois_by_trip_days_before_llm(monkeypatch):
+async def test_custom_itinerary_runs_global_tsp_before_splitting_days(monkeypatch):
     from src.application.services.itinerary_service import CustomItineraryService
     from src.domain.itinerary import Activity, DayPlan, Itinerary
     from src.presentation.schemas_itinerary import CustomItineraryRequest
@@ -245,7 +271,8 @@ async def test_custom_itinerary_groups_pois_by_trip_days_before_llm(monkeypatch)
 
     await CustomItineraryService().create_custom_itinerary(request)
 
-    assert len(optimizer_calls) == 2
+    assert len(optimizer_calls) == 1
+    assert [poi["metadata"]["poi_id"] for poi in optimizer_calls[0]] == ["a", "b", "c", "d"]
     assert [poi["metadata"]["day_number"] for poi in llm_kwargs["ordered_pois"]] == [1, 1, 2, 2]
 
 
@@ -322,4 +349,191 @@ async def test_custom_itinerary_uses_hotel_poi_as_start_location(monkeypatch):
 
     assert start_locations[0]["metadata"]["poi_id"] == "hotel-1"
     assert [poi["metadata"]["poi_id"] for poi in llm_kwargs["ordered_pois"]] == ["a", "b"]
+
+
+def test_custom_itinerary_accepts_more_than_twenty_selected_pois():
+    from src.presentation.schemas_itinerary import CustomItineraryRequest
+
+    request = CustomItineraryRequest.model_validate(
+        {
+            "duration": "5 days",
+            "selectedPois": [
+                {
+                    "poiId": f"poi-{index}",
+                    "poiName": f"POI {index}",
+                    "lat": 13.9 + index * 0.001,
+                    "lng": 108.0 + index * 0.001,
+                }
+                for index in range(21)
+            ],
+        }
+    )
+
+    assert len(request.selected_pois) == 21
+
+
+def test_custom_itinerary_defaults_travel_day_time_window():
+    from src.presentation.schemas_itinerary import CustomItineraryRequest
+
+    request = CustomItineraryRequest.model_validate(
+        {
+            "duration": "1 day",
+            "selectedPois": [
+                {"poiId": "a", "poiName": "A", "lat": 13.90, "lng": 108.00},
+            ],
+        }
+    )
+
+    assert request.daily_start_time == "06:00"
+    assert request.daily_end_time == "21:00"
+
+
+@pytest.mark.anyio
+async def test_custom_itinerary_uses_previous_day_end_as_next_day_start_without_hotel(monkeypatch):
+    from src.application.services.itinerary_service import CustomItineraryService
+    from src.domain.itinerary import Activity, DayPlan, Itinerary
+    from src.presentation.schemas_itinerary import CustomItineraryRequest
+
+    start_location_ids = []
+
+    async def fake_optimize_route(pois, *, should_optimize=True, start_location=None):
+        start_location_ids.append(
+            start_location.get("metadata", {}).get("poi_id") if start_location else None
+        )
+        for index, poi in enumerate(pois):
+            poi["metadata"]["route_order"] = index + 1
+            poi["metadata"]["distance_from_prev_km"] = 0.0
+        return pois, {
+            "estimated_km": 0.0,
+            "optimizer": "nearest_neighbor",
+            "distance_source": "none",
+        }
+
+    async def fake_generate_itinerary_from_pois(**kwargs):
+        return Itinerary(
+            days=[
+                DayPlan(
+                    day=1,
+                    title="No hotel",
+                    total_km=0.0,
+                    activities=[
+                        Activity(
+                            time_slot="08:00-09:00",
+                            poi_id=poi["metadata"]["poi_id"],
+                            poi_name=poi["metadata"]["poi_name"],
+                            lat=poi["metadata"]["lat"],
+                            lng=poi["metadata"]["lng"],
+                            duration_minutes=60,
+                            cost=0.0,
+                            distance_from_prev_km=0.0,
+                            intensity_level="low",
+                            note="No hotel",
+                        )
+                        for poi in kwargs["ordered_pois"]
+                    ],
+                )
+            ],
+            total_cost=0.0,
+            total_km=0.0,
+        )
+
+    monkeypatch.setattr(
+        "src.application.services.itinerary_service.optimize_route",
+        fake_optimize_route,
+    )
+    monkeypatch.setattr(
+        "src.application.services.itinerary_service.generate_itinerary_from_pois",
+        fake_generate_itinerary_from_pois,
+    )
+
+    request = CustomItineraryRequest.model_validate(
+        {
+            "duration": "2 days",
+            "selectedPois": [
+                {"poiId": "a", "poiName": "A", "lat": 13.90, "lng": 108.00},
+                {"poiId": "b", "poiName": "B", "lat": 13.91, "lng": 108.01},
+                {"poiId": "c", "poiName": "C", "lat": 14.20, "lng": 108.30},
+                {"poiId": "d", "poiName": "D", "lat": 14.21, "lng": 108.31},
+            ],
+        }
+    )
+
+    await CustomItineraryService().create_custom_itinerary(request)
+
+    assert start_location_ids == [None]
+
+
+@pytest.mark.anyio
+async def test_custom_itinerary_applies_deterministic_schedule_and_travel_minutes(monkeypatch):
+    from src.application.services.itinerary_service import CustomItineraryService
+    from src.domain.itinerary import Activity, DayPlan, Itinerary
+    from src.presentation.schemas_itinerary import CustomItineraryRequest
+
+    async def fake_optimize_route(pois, *, should_optimize=True, start_location=None):
+        for index, poi in enumerate(pois):
+            poi["metadata"]["route_order"] = index + 1
+            poi["metadata"]["distance_from_prev_km"] = 14.0 if index == 0 else 7.0
+        return pois, {
+            "estimated_km": 21.0,
+            "optimizer": "nearest_neighbor",
+            "distance_source": "haversine_road_estimate",
+        }
+
+    async def fake_generate_itinerary_from_pois(**kwargs):
+        return Itinerary(
+            days=[
+                DayPlan(
+                    day=1,
+                    title="Timed",
+                    total_km=0.0,
+                    activities=[
+                        Activity(
+                            time_slot="00:00-00:00",
+                            poi_id=poi["metadata"]["poi_id"],
+                            poi_name=poi["metadata"]["poi_name"],
+                            lat=poi["metadata"]["lat"],
+                            lng=poi["metadata"]["lng"],
+                            duration_minutes=10,
+                            cost=0.0,
+                            distance_from_prev_km=0.0,
+                            intensity_level="low",
+                            note="LLM note",
+                        )
+                        for poi in kwargs["ordered_pois"]
+                    ],
+                )
+            ],
+            total_cost=0.0,
+            total_km=0.0,
+        )
+
+    monkeypatch.setattr(
+        "src.application.services.itinerary_service.optimize_route",
+        fake_optimize_route,
+    )
+    monkeypatch.setattr(
+        "src.application.services.itinerary_service.generate_itinerary_from_pois",
+        fake_generate_itinerary_from_pois,
+    )
+
+    request = CustomItineraryRequest.model_validate(
+        {
+            "duration": "1 day",
+            "transport": "motorbike",
+            "dailyStartTime": "08:00",
+            "selectedPois": [
+                {"poiId": "a", "poiName": "A", "lat": 13.90, "lng": 108.00, "durationMinutes": 45},
+                {"poiId": "b", "poiName": "B", "lat": 13.91, "lng": 108.01, "durationMinutes": 30},
+            ],
+        }
+    )
+
+    response = await CustomItineraryService().create_custom_itinerary(request)
+    first_activity = response.itinerary.days[0].activities[0]
+    second_activity = response.itinerary.days[0].activities[1]
+
+    assert first_activity.time_slot == "08:30-09:15"
+    assert first_activity.travel_from_previous_minutes == 30
+    assert second_activity.time_slot == "09:45-10:15"
+    assert response.optimized_poi_order[0].travel_from_previous_minutes == 30
 

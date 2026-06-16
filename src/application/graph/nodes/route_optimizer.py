@@ -23,6 +23,7 @@ service mà không cần đi qua LangGraph node.
 from __future__ import annotations
 
 import copy
+import itertools
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
@@ -115,6 +116,166 @@ def _nearest_neighbor_order(
         ordered.append(remaining.pop(next_index))
 
     return ordered
+
+
+def _path_distance(
+    order: List[int],
+    distance_matrix: List[List[float]],
+    start_distances: Optional[List[float]] = None,
+) -> float:
+    if not order:
+        return 0.0
+
+    total = start_distances[order[0]] if start_distances else 0.0
+    for left, right in zip(order, order[1:]):
+        total += distance_matrix[left][right]
+    return total
+
+
+def _build_distance_matrix(coords: List[Coordinate]) -> List[List[float]]:
+    return [
+        [
+            0.0 if left_index == right_index else haversine_km(left[0], left[1], right[0], right[1])
+            for right_index, right in enumerate(coords)
+        ]
+        for left_index, left in enumerate(coords)
+    ]
+
+
+def _nearest_neighbor_index_order(
+    distance_matrix: List[List[float]],
+    *,
+    start_distances: Optional[List[float]] = None,
+    start_index: Optional[int] = None,
+) -> List[int]:
+    remaining = set(range(len(distance_matrix)))
+    if start_distances:
+        current = min(remaining, key=lambda idx: start_distances[idx])
+    elif start_index is not None:
+        current = start_index
+    else:
+        current = 0
+
+    ordered = [current]
+    remaining.remove(current)
+
+    while remaining:
+        current = min(remaining, key=lambda idx: distance_matrix[ordered[-1]][idx])
+        ordered.append(current)
+        remaining.remove(current)
+
+    return ordered
+
+
+def _two_opt_order(
+    order: List[int],
+    distance_matrix: List[List[float]],
+    *,
+    start_distances: Optional[List[float]] = None,
+) -> List[int]:
+    if len(order) < 4:
+        return order
+
+    best = list(order)
+    best_distance = _path_distance(best, distance_matrix, start_distances)
+    improved = True
+
+    while improved:
+        improved = False
+        for left in range(len(best) - 2):
+            for right in range(left + 2, len(best)):
+                candidate = best[:left + 1] + list(reversed(best[left + 1:right + 1])) + best[right + 1:]
+                candidate_distance = _path_distance(candidate, distance_matrix, start_distances)
+                if candidate_distance + 1e-9 < best_distance:
+                    best = candidate
+                    best_distance = candidate_distance
+                    improved = True
+                    break
+            if improved:
+                break
+
+    return best
+
+
+def _exact_tsp_path_order(
+    distance_matrix: List[List[float]],
+    *,
+    start_distances: Optional[List[float]] = None,
+) -> List[int]:
+    best_order: List[int] | None = None
+    best_distance = float("inf")
+
+    for permutation in itertools.permutations(range(len(distance_matrix))):
+        order = list(permutation)
+        distance = _path_distance(order, distance_matrix, start_distances)
+        if distance < best_distance:
+            best_order = order
+            best_distance = distance
+
+    return best_order or []
+
+
+def _global_tsp_order(
+    pois: List[Dict[str, Any]],
+    *,
+    start_location: Optional[Dict[str, Any]] = None,
+) -> Tuple[List[Dict[str, Any]], str]:
+    """Order POIs as one global open TSP path, then append invalid-coordinate POIs."""
+    valid_items: List[Tuple[int, Dict[str, Any], Coordinate]] = []
+    invalid_items: List[Tuple[int, Dict[str, Any]]] = []
+
+    for index, poi in enumerate(pois):
+        coord = _coordinate_from_metadata(poi.get("metadata", {}))
+        if coord:
+            valid_items.append((index, poi, coord))
+        else:
+            invalid_items.append((index, poi))
+
+    if len(valid_items) < 2:
+        return list(pois), "tsp_exact"
+
+    coords = [coord for _, _, coord in valid_items]
+    distance_matrix = _build_distance_matrix(coords)
+    start_coord = (
+        _coordinate_from_metadata(start_location.get("metadata", {}))
+        if start_location
+        else None
+    )
+    start_distances = (
+        [_distance_for_sort(start_coord, coord) for coord in coords]
+        if start_coord
+        else None
+    )
+
+    if len(valid_items) <= 8:
+        order_indexes = _exact_tsp_path_order(
+            distance_matrix,
+            start_distances=start_distances,
+        )
+        optimizer_name = "tsp_exact"
+    else:
+        seeds = [
+            _nearest_neighbor_index_order(
+                distance_matrix,
+                start_distances=start_distances,
+                start_index=None if start_distances else seed_index,
+            )
+            for seed_index in range(len(valid_items))
+        ]
+        seed_order = min(
+            seeds,
+            key=lambda order: _path_distance(order, distance_matrix, start_distances),
+        )
+        order_indexes = _two_opt_order(
+            seed_order,
+            distance_matrix,
+            start_distances=start_distances,
+        )
+        optimizer_name = "tsp_2opt"
+
+    ordered_valid = [valid_items[index][1] for index in order_indexes]
+    ordered_invalid = [poi for _, poi in sorted(invalid_items, key=lambda item: item[0])]
+    return ordered_valid + ordered_invalid, optimizer_name
 
 
 def _distance_for_sort(origin: Coordinate, destination: Optional[Coordinate]) -> float:
@@ -231,11 +392,14 @@ async def optimize_route(
         }
 
     # Sort phase — không mutate original
-    sorted_pois = (
-        _nearest_neighbor_order(pois, start_location=start_location)
-        if should_optimize
-        else list(pois)
-    )
+    optimizer_name = "user_defined_order"
+    if should_optimize:
+        sorted_pois, optimizer_name = _global_tsp_order(
+            pois,
+            start_location=start_location,
+        )
+    else:
+        sorted_pois = list(pois)
 
     # Deep-copy để hoàn toàn tách biệt với input
     ordered_pois: List[Dict[str, Any]] = [copy.deepcopy(p) for p in sorted_pois]
@@ -277,7 +441,7 @@ async def optimize_route(
 
     route_summary = {
         "estimated_km": round(total_km, 2),
-        "optimizer": "nearest_neighbor" if should_optimize else "user_defined_order",
+        "optimizer": optimizer_name,
         "distance_source": overall_source,
     }
 

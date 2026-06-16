@@ -10,6 +10,7 @@ class Activity(BaseModel):
     duration_minutes: int
     cost: float
     distance_from_prev_km: float
+    travel_from_previous_minutes: int = 0
     intensity_level: str
     note: str
 
@@ -20,6 +21,7 @@ class DayPlan(BaseModel):
     activities: List[Activity]
 
 class Itinerary(BaseModel):
+    overview: str = ""
     days: List[DayPlan]
     total_cost: float
     total_km: float

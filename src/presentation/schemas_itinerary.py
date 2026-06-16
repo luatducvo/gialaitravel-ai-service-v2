@@ -81,6 +81,11 @@ class PoiInput(BaseModel):
         alias="imageUrl",
         description="Representative image URL",
     )
+    is_accommodation: bool = Field(
+        False,
+        alias="isAccommodation",
+        description="True when the backend category marks this POI as accommodation",
+    )
 
     @field_validator("lat")
     @classmethod
@@ -127,13 +132,32 @@ class CustomItineraryRequest(BaseModel):
         alias="startLocation",
         description="Optional hotel/current location used as the route start anchor",
     )
+    daily_start_time: str = Field(
+        "06:00",
+        alias="dailyStartTime",
+        description="Preferred day start time in HH:MM",
+    )
+    daily_end_time: str = Field(
+        "21:00",
+        alias="dailyEndTime",
+        description="Preferred day end time in HH:MM",
+    )
     selected_pois: List[PoiInput] = Field(
         ...,
         alias="selectedPois",
         min_length=1,
-        max_length=20,
+        max_length=60,
         description="POI snapshots selected and validated by the backend",
     )
+
+    @field_validator("daily_start_time", "daily_end_time")
+    @classmethod
+    def validate_hhmm(cls, value: str) -> str:
+        import re
+
+        if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", value):
+            raise ValueError("Time must use HH:MM 24-hour format")
+        return value
 
     @model_validator(mode="after")
     def check_unique_poi_ids(self) -> "CustomItineraryRequest":
@@ -172,6 +196,10 @@ class OptimizedPoiItem(BaseModel):
     distance_from_prev_km: float = Field(
         0.0,
         description="Road distance from the previous POI in km; 0 for the first item",
+    )
+    travel_from_previous_minutes: int = Field(
+        0,
+        description="Estimated travel time from the previous anchor/POI in minutes",
     )
 
 

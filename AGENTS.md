@@ -337,8 +337,8 @@ Service sequence:
 1. Convert each `PoiInput` into planner/optimizer metadata.
 2. Determine start anchor from explicit `startLocation` or hotel-like selected POI.
 3. Remove that start anchor from activity POIs.
-4. Split activity POIs by trip days.
-5. Optimize each day's route through `optimize_route()`.
+4. Optimize all activity POIs once through `optimize_route()` as a global TSP path.
+5. Split the optimized global path into trip days without reordering it.
 6. Add `day_number`, `day_route_order`, route order, and distance metadata.
 7. Call `generate_itinerary_from_pois()`.
 8. Normalize recoverable route-order IDs back to real POI IDs.

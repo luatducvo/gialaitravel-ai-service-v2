@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import re
 from typing import Any, Dict, List
 
@@ -12,6 +11,7 @@ from loguru import logger
 from src.application.graph.nodes.llm_planner import generate_itinerary_from_pois
 from src.application.graph.nodes.route_optimizer import optimize_route
 from src.application.services.distance import haversine_km
+from src.domain.itinerary import Activity, DayPlan
 from src.presentation.schemas_itinerary import (
     CustomItineraryRequest,
     CustomItineraryResponse,
@@ -45,6 +45,7 @@ def _poi_snapshot_to_planner_dict(poi: PoiInput) -> Dict[str, Any]:
             "duration_minutes": duration_minutes,
             "intensity_level": intensity_level,
             "image_url": poi.image_url,
+            "is_accommodation": poi.is_accommodation,
         },
     }
 
@@ -97,7 +98,11 @@ def _is_hotel_poi(poi: Dict[str, Any]) -> bool:
     metadata = poi.get("metadata", {})
     category = str(metadata.get("category") or "").strip().lower()
     tags = {str(tag).strip().lower() for tag in metadata.get("tags", [])}
-    return category in HOTEL_CATEGORIES or bool(tags & HOTEL_CATEGORIES)
+    return (
+        bool(metadata.get("is_accommodation"))
+        or category in HOTEL_CATEGORIES
+        or bool(tags & HOTEL_CATEGORIES)
+    )
 
 
 def _coordinate_from_planner_poi(poi: Dict[str, Any]) -> tuple[float, float] | None:
@@ -112,36 +117,37 @@ def _coordinate_from_planner_poi(poi: Dict[str, Any]) -> tuple[float, float] | N
         return None
 
 
-def _sort_for_daily_groups(
+def _distance_between_pois(
+    origin: Dict[str, Any] | None,
+    destination: Dict[str, Any],
+) -> float:
+    origin_coord = _coordinate_from_planner_poi(origin) if origin else None
+    destination_coord = _coordinate_from_planner_poi(destination)
+    if not origin_coord or not destination_coord:
+        return float("inf")
+    return haversine_km(origin_coord[0], origin_coord[1], destination_coord[0], destination_coord[1])
+
+
+def _nearest_unassigned_poi(
     pois: List[Dict[str, Any]],
-    start_location: Dict[str, Any] | None,
-) -> List[Dict[str, Any]]:
-    """Sort POIs into a deterministic geographic sweep before day chunking."""
-    coordinates = [_coordinate_from_planner_poi(poi) for poi in pois]
-    valid_coordinates = [coord for coord in coordinates if coord]
-    if not valid_coordinates:
-        return list(pois)
+    anchor: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    if not anchor:
+        return max(
+            pois,
+            key=lambda poi: float(poi.get("metadata", {}).get("score") or 0.0),
+        )
+    return min(pois, key=lambda poi: _distance_between_pois(anchor, poi))
 
-    start_coord = (
-        _coordinate_from_planner_poi(start_location)
-        if start_location
-        else None
+
+def _nearest_to_group(
+    pois: List[Dict[str, Any]],
+    group: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    return min(
+        pois,
+        key=lambda candidate: min(_distance_between_pois(anchor, candidate) for anchor in group),
     )
-    if start_coord:
-        anchor_lat, anchor_lng = start_coord
-    else:
-        anchor_lat = sum(coord[0] for coord in valid_coordinates) / len(valid_coordinates)
-        anchor_lng = sum(coord[1] for coord in valid_coordinates) / len(valid_coordinates)
-
-    def sort_key(poi: Dict[str, Any]) -> tuple[float, float]:
-        coord = _coordinate_from_planner_poi(poi)
-        if not coord:
-            return (float("inf"), float("inf"))
-        angle = math.atan2(coord[0] - anchor_lat, coord[1] - anchor_lng)
-        distance = haversine_km(anchor_lat, anchor_lng, coord[0], coord[1])
-        return (angle, distance)
-
-    return sorted(pois, key=sort_key)
 
 
 def _split_pois_by_trip_days(
@@ -150,7 +156,7 @@ def _split_pois_by_trip_days(
     duration: str,
     start_location: Dict[str, Any] | None,
 ) -> List[List[Dict[str, Any]]]:
-    """Group selected POIs by trip duration before optimizing each day."""
+    """Cluster selected POIs by nearby geography and visit duration before routing."""
     if not pois:
         return []
 
@@ -158,54 +164,198 @@ def _split_pois_by_trip_days(
     if day_count <= 1:
         return [list(pois)]
 
-    sorted_pois = _sort_for_daily_groups(pois, start_location)
-    remaining_visit_minutes = sum(
-        int(poi.get("metadata", {}).get("duration_minutes") or 60)
-        for poi in sorted_pois
-    )
+    unassigned = list(pois)
+    remaining_visit_minutes = sum(_visit_minutes(poi) for poi in unassigned)
     groups: List[List[Dict[str, Any]]] = []
-    cursor = 0
+    rolling_anchor = start_location
 
     for day_index in range(day_count):
         remaining_days = day_count - day_index
-        remaining_pois = len(sorted_pois) - cursor
         if remaining_days == 1:
-            groups.append(sorted_pois[cursor:])
+            groups.append(unassigned)
+            break
+
+        target_minutes = remaining_visit_minutes / remaining_days
+        first_poi = _nearest_unassigned_poi(unassigned, rolling_anchor)
+        group: List[Dict[str, Any]] = [first_poi]
+        unassigned.remove(first_poi)
+        group_minutes = _visit_minutes(first_poi)
+        remaining_visit_minutes -= group_minutes
+        min_pois_for_day = max(1, (len(unassigned) + 1) // remaining_days)
+
+        while unassigned:
+            pois_left_after_take = len(unassigned) - 1
+            if pois_left_after_take < remaining_days - 1:
+                break
+
+            next_poi = _nearest_to_group(unassigned, group)
+            next_minutes = _visit_minutes(next_poi)
+            if len(group) >= min_pois_for_day and group_minutes + next_minutes > target_minutes:
+                break
+
+            group.append(next_poi)
+            unassigned.remove(next_poi)
+            group_minutes += next_minutes
+            remaining_visit_minutes -= next_minutes
+
+        groups.append(group)
+        rolling_anchor = group[-1]
+
+    return [group for group in groups if group]
+
+
+def _split_ordered_pois_by_trip_days(
+    pois: List[Dict[str, Any]],
+    *,
+    duration: str,
+) -> List[List[Dict[str, Any]]]:
+    """Split a globally ordered TSP path into day buckets without reordering."""
+    if not pois:
+        return []
+
+    day_count = min(_trip_day_count(duration), len(pois))
+    if day_count <= 1:
+        return [list(pois)]
+
+    remaining = list(pois)
+    remaining_visit_minutes = sum(_visit_minutes(poi) for poi in remaining)
+    groups: List[List[Dict[str, Any]]] = []
+
+    for day_index in range(day_count):
+        remaining_days = day_count - day_index
+        if remaining_days == 1:
+            groups.append(remaining)
             break
 
         target_minutes = remaining_visit_minutes / remaining_days
         group: List[Dict[str, Any]] = []
         group_minutes = 0
-        min_pois_for_day = max(1, remaining_pois // remaining_days)
 
-        while cursor < len(sorted_pois):
-            pois_left_after_take = len(sorted_pois) - cursor - 1
-            if pois_left_after_take < remaining_days - 1:
+        while remaining:
+            pois_left_after_take = len(remaining) - 1
+            if group and pois_left_after_take < remaining_days - 1:
                 break
 
-            poi = sorted_pois[cursor]
-            duration_minutes = int(poi.get("metadata", {}).get("duration_minutes") or 60)
-            should_stop = (
-                len(group) >= min_pois_for_day
-                and group_minutes > 0
-                and group_minutes + duration_minutes > target_minutes
-            )
-            if should_stop:
+            next_poi = remaining[0]
+            next_minutes = _visit_minutes(next_poi)
+            if group and group_minutes + next_minutes > target_minutes:
                 break
 
-            group.append(poi)
-            group_minutes += duration_minutes
-            remaining_visit_minutes -= duration_minutes
-            cursor += 1
+            group.append(remaining.pop(0))
+            group_minutes += next_minutes
+            remaining_visit_minutes -= next_minutes
 
-        groups.append(group or [sorted_pois[cursor]])
-        if not group:
-            remaining_visit_minutes -= int(
-                sorted_pois[cursor].get("metadata", {}).get("duration_minutes") or 60
-            )
-            cursor += 1
+        if not group and remaining:
+            next_poi = remaining.pop(0)
+            group.append(next_poi)
+            remaining_visit_minutes -= _visit_minutes(next_poi)
+
+        groups.append(group)
 
     return [group for group in groups if group]
+
+
+def _visit_minutes(poi: Dict[str, Any]) -> int:
+    return int(poi.get("metadata", {}).get("duration_minutes") or 60)
+
+
+def _time_to_minutes(value: str) -> int:
+    hours, minutes = value.split(":")
+    return int(hours) * 60 + int(minutes)
+
+
+def _minutes_to_time(value: int) -> str:
+    value = max(0, min(value, 23 * 60 + 59))
+    return f"{value // 60:02d}:{value % 60:02d}"
+
+
+def _travel_minutes(distance_km: float, transport: str) -> int:
+    if distance_km <= 0:
+        return 0
+    speeds = {"motorbike": 28.0, "car": 35.0, "bus": 24.0}
+    speed = speeds.get(transport, 28.0)
+    return max(1, round(distance_km / speed * 60))
+
+
+def _ordered_activity_template(itinerary) -> Dict[str, Activity]:
+    return {
+        str(activity.poi_id): activity
+        for day in itinerary.days
+        for activity in day.activities
+    }
+
+
+def _apply_deterministic_schedule(
+    itinerary,
+    ordered_pois: List[Dict[str, Any]],
+    request: CustomItineraryRequest,
+) -> None:
+    """Make day grouping and time slots deterministic after LLM text generation."""
+    activity_by_poi_id = _ordered_activity_template(itinerary)
+    start_minutes = _time_to_minutes(request.daily_start_time)
+    end_minutes = _time_to_minutes(request.daily_end_time)
+    grouped: Dict[int, List[Dict[str, Any]]] = {}
+
+    for poi in ordered_pois:
+        metadata = poi.get("metadata", {})
+        day_number = int(metadata.get("day_number") or 1)
+        grouped.setdefault(day_number, []).append(poi)
+
+    days: List[DayPlan] = []
+    for day_number in sorted(grouped):
+        cursor = start_minutes
+        activities: List[Activity] = []
+        total_km = 0.0
+
+        for poi in grouped[day_number]:
+            metadata = poi.get("metadata", {})
+            poi_id = str(metadata.get("poi_id") or "")
+            llm_activity = activity_by_poi_id.get(poi_id)
+            distance_km = float(metadata.get("distance_from_prev_km") or 0.0)
+            travel_minutes = _travel_minutes(distance_km, request.transport.value)
+            visit_minutes = _visit_minutes(poi)
+
+            cursor += travel_minutes
+            start = cursor
+            end = min(start + visit_minutes, end_minutes)
+            cursor = min(end + 15, end_minutes)
+            total_km += distance_km
+
+            activities.append(
+                Activity(
+                    time_slot=f"{_minutes_to_time(start)}-{_minutes_to_time(end)}",
+                    poi_id=poi_id,
+                    poi_name=metadata.get("poi_name") or (llm_activity.poi_name if llm_activity else poi_id),
+                    lat=float(metadata.get("lat") or 0.0),
+                    lng=float(metadata.get("lng") or 0.0),
+                    duration_minutes=visit_minutes,
+                    cost=float(metadata.get("cost") or 0.0),
+                    distance_from_prev_km=round(distance_km, 2),
+                    travel_from_previous_minutes=travel_minutes,
+                    intensity_level=str(metadata.get("intensity_level") or "medium"),
+                    note=(llm_activity.note if llm_activity else "Recommended stop"),
+                )
+            )
+
+        days.append(
+            DayPlan(
+                day=day_number,
+                title=(
+                    itinerary.days[day_number - 1].title
+                    if day_number - 1 < len(itinerary.days)
+                    else f"Day {day_number}"
+                ),
+                total_km=round(total_km, 2),
+                activities=activities,
+            )
+        )
+
+    itinerary.days = days
+    itinerary.total_km = round(sum(day.total_km for day in days), 2)
+    itinerary.total_cost = round(
+        sum(activity.cost for day in days for activity in day.activities),
+        2,
+    )
 
 
 def _normalize_itinerary_poi_ids(
@@ -283,55 +433,41 @@ class CustomItineraryService:
             None,
         )
         start_location = explicit_start_location or hotel_start_location
+        has_fixed_daily_start = start_location is not None
         activity_pois = [
             poi for poi in selected_pois
             if not (start_location and poi.get("metadata", {}).get("poi_id") == start_location.get("metadata", {}).get("poi_id"))
         ]
-        daily_groups = _split_pois_by_trip_days(
+        global_ordered_pois, global_summary = await optimize_route(
             activity_pois,
-            duration=request.duration,
+            should_optimize=request.optimize_route,
             start_location=start_location,
+        )
+        daily_groups = _split_ordered_pois_by_trip_days(
+            global_ordered_pois,
+            duration=request.duration,
         )
 
         ordered_pois: List[Dict[str, Any]] = []
-        total_km = 0.0
-        distance_sources: List[str] = []
-        optimizer_names: List[str] = []
-
         for day_number, daily_pois in enumerate(daily_groups, start=1):
-            daily_ordered_pois, daily_summary = await optimize_route(
-                daily_pois,
-                should_optimize=request.optimize_route,
-                start_location=start_location,
-            )
-            total_km += float(daily_summary["estimated_km"])
-            optimizer_names.append(daily_summary["optimizer"])
-            distance_source = daily_summary.get("distance_source", "none")
-            if distance_source != "none":
-                distance_sources.append(distance_source)
-
-            for poi in daily_ordered_pois:
+            for day_route_order, poi in enumerate(daily_pois, start=1):
                 metadata = poi.setdefault("metadata", {})
+                if has_fixed_daily_start and start_location and day_route_order == 1 and day_number > 1:
+                    metadata["distance_from_prev_km"] = round(
+                        _distance_between_pois(start_location, poi),
+                        2,
+                    )
                 metadata["day_number"] = day_number
-                metadata["day_route_order"] = metadata.get("route_order", 1)
+                metadata["day_route_order"] = day_route_order
                 metadata["route_order"] = len(ordered_pois) + 1
                 ordered_pois.append(poi)
 
-        if not distance_sources:
-            overall_source = "none"
-        elif all(source == "google_maps" for source in distance_sources):
-            overall_source = "google_maps"
-        elif all(source == "haversine_road_estimate" for source in distance_sources):
-            overall_source = "haversine_road_estimate"
-        else:
-            overall_source = "mixed"
-
-        if not optimizer_names:
-            optimizer = "none"
-        elif len(set(optimizer_names)) == 1:
-            optimizer = optimizer_names[0]
-        else:
-            optimizer = "mixed"
+        total_km = sum(
+            float(poi.get("metadata", {}).get("distance_from_prev_km") or 0.0)
+            for poi in ordered_pois
+        )
+        optimizer = str(global_summary.get("optimizer", "none"))
+        overall_source = str(global_summary.get("distance_source", "none"))
 
         raw_summary = {
             "estimated_km": round(total_km, 2),
@@ -392,6 +528,12 @@ class CustomItineraryService:
                 + ", ".join(sorted(unknown_poi_ids))
             )
 
+        _apply_deterministic_schedule(
+            itinerary=itinerary,
+            ordered_pois=ordered_pois,
+            request=request,
+        )
+
         optimized_order = [
             OptimizedPoiItem(
                 poi_id=poi.get("metadata", {}).get("poi_id", ""),
@@ -402,6 +544,10 @@ class CustomItineraryService:
                 day_number=poi.get("metadata", {}).get("day_number", 1),
                 day_route_order=poi.get("metadata", {}).get("day_route_order", index + 1),
                 distance_from_prev_km=poi.get("metadata", {}).get("distance_from_prev_km", 0.0),
+                travel_from_previous_minutes=_travel_minutes(
+                    float(poi.get("metadata", {}).get("distance_from_prev_km", 0.0) or 0.0),
+                    request.transport.value,
+                ),
             )
             for index, poi in enumerate(ordered_pois)
         ]
