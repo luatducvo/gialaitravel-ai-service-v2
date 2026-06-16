@@ -17,7 +17,6 @@ __pycache__/
 .idea/
 .gemini/
 .agents/
-AGENTS.md
 
 # Project files
 logs/

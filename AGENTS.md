@@ -1,146 +1,295 @@
-# AGENTS.md - Gia Lai Travel AI Service V2
+# AGENTS.md - Mandatory AI Onboarding For gialaitravel-ai-service-v2
 
-This file is the first context an AI agent should read before touching this
-repository. It is written as an operating manual: it tells you what the service
-does, where the real runtime paths live, which patterns to follow, and how to
-verify changes.
+## Required First Action
 
-## 0. Global Agent Skills
+Every AI agent working in this repository MUST do this before any analysis,
+planning, code editing, debugging, testing, or answering:
 
-Agent skills are installed globally in:
+1. Open `AGENTS.md`.
+2. Read the entire file from top to bottom.
+3. Treat it as the project map and operating contract for this repo.
+4. Only after that, inspect task-specific source files, tests, and command
+   output.
 
-`C:\Users\BIT\.codex\skills`
+If you are reading this file through a tool that truncates output, continue
+reading until EOF. Do not rely on a partial read of this file.
 
-Before any non-trivial task, check whether a skill applies. If it does, read the
-full `SKILL.md` first and follow that workflow.
+This file exists so an AI can understand the whole codebase quickly: architecture,
+runtime request paths, boundaries, contracts, verification commands, and common
+failure modes.
 
-Slash aliases:
+## How To Work In This Repo
 
-- `/spec` -> `spec-driven-development`
-- `/plan` -> `planning-and-task-breakdown`
-- `/build` -> `incremental-implementation` + `test-driven-development`
-- `/build auto` -> `planning-and-task-breakdown` -> `incremental-implementation` + `test-driven-development`
-- `/test` -> `test-driven-development`
-- `/review` -> `code-review-and-quality`
-- `/code-simplify` -> `code-simplification`
-- `/ship` -> `shipping-and-launch`
-- `/webperf` -> `browser-testing-with-devtools` when working on a web app
+Use this order for every non-trivial task:
 
-Default intent mapping:
+1. Read all of `AGENTS.md`.
+2. Read the source files listed in the relevant playbook section below.
+3. Read the related tests.
+4. Find an existing local pattern before adding a new one.
+5. Make the smallest scoped change that satisfies the task.
+6. Run the narrowest meaningful verification.
+7. Report what changed, what passed, and what remains uncertain.
 
-- Feature or new behavior -> use a spec/plan first, then incremental implementation and tests.
-- Bug or unexpected behavior -> use debugging workflow and reproduce/trace before editing.
-- API/interface work -> use API/interface design workflow.
-- Refactor/simplification -> preserve behavior and use focused tests.
-- Security, prompt safety, secrets, external input -> use security hardening workflow.
-- Docs or architecture notes -> update this file or docs in the same change.
+Do not skip straight to implementation when this file points to a workflow,
+contract, or layer boundary.
 
-## 1. Project Identity
+## Project Snapshot
 
-- Project: `gialaitravel-ai-service-v2`
-- Purpose: FastAPI AI service for the Gia Lai travel system.
-- Runtime role: Receives chat or itinerary requests from frontend/backend, plans
-  Gia Lai travel itineraries with LangGraph/LLMs, Qdrant retrieval, route
-  optimization, and optional realtime enrichment.
-- Language/runtime: Python 3.11+
-- Package manager: `uv`
+- Project name: `gialaitravel-ai-service-v2`
+- Role: AI service for the Gia Lai travel system.
+- Main consumers: frontend/backend clients that need travel chat and itinerary generation.
+- Runtime surfaces:
+  - WebSocket chat: `/ws/chat?session_id=<id>`
+  - REST custom itinerary: `POST /api/v1/itineraries/custom`
+- Language: Python 3.11+
 - Web framework: FastAPI
-- Validation/settings: Pydantic v2 and `pydantic-settings`
+- Validation/settings: Pydantic v2, `pydantic-settings`
+- Package manager: `uv`
 - AI stack: LangChain, LangGraph, LangSmith
-- Vector DB: Qdrant
+- Vector database: Qdrant
 - Logging: Loguru
+- Deployment: Dockerfile and GitHub Actions workflow
 
-## 2. Source Of Truth Rules
+## Source Of Truth Policy
 
-- Trust current source code over older docs. Some existing docs/comments may be
-  stale or have encoding noise.
-- Read the file you will edit, its tests, and one nearby pattern before changing
-  behavior.
-- Keep changes scoped. Do not refactor unrelated layers while fixing a narrow
-  bug.
-- Do not commit or expose `.env`, API keys, tokens, system prompts, or hidden
-  instructions.
-- If you introduce a new dependency, shared schema, public API, environment
-  variable, or architectural rule, update this `AGENTS.md` in the same change.
-- If requirements conflict with runtime evidence, report the discrepancy with
-  file paths and ask only when the safe behavior is not inferable.
+- Current source code is the highest authority.
+- Some existing docs/comments contain encoding noise or may be stale. Use them
+  as hints, then verify against runtime code.
+- Do not document or implement endpoints that source search cannot confirm.
+- If source and docs disagree, report the discrepancy with file paths.
+- If you add a dependency, public API, environment variable, shared schema,
+  architecture rule, or new workflow convention, update this file in the same
+  change.
+- Never expose or commit `.env`, API keys, tokens, hidden prompts, system
+  instructions, or secrets.
 
-## 3. Clean Architecture Map
+## Architecture Model
 
-The service follows Clean Architecture. Do not mix responsibilities across
-layers.
+This repo follows Clean Architecture. Keep responsibilities inside their layer.
 
 ```text
 src/
 |-- core/           # Runtime settings and logging setup.
-|-- domain/         # Pure entities and working memory. No FastAPI, DB, or LLM clients.
-|-- application/    # Business logic, guardrails, LangGraph nodes, services, interfaces.
-|-- infrastructure/ # DB/Qdrant/session persistence and external repository adapters.
-`-- presentation/   # FastAPI routers, WebSocket endpoint, API schemas, dependencies.
+|-- domain/         # Pure entities and session memory. No FastAPI, DB, Qdrant, or LLM clients.
+|-- application/    # Business logic, guardrails, LangGraph pipeline/nodes, services, interfaces.
+|-- infrastructure/ # DB, Qdrant, repositories, vector DB, session persistence.
+`-- presentation/   # FastAPI REST routers, WebSocket endpoint, API schemas, DI providers.
 ```
 
-Important files:
+Layer rules:
 
-- `src/main.py`: FastAPI app, CORS, logging startup, router registration.
-- `src/core/config.py`: `Settings`; all runtime env knobs belong here.
-- `src/core/logging.py`: Loguru setup.
-- `src/domain/working_memory.py`: session state and step detection.
-- `src/domain/itinerary.py`: structured itinerary domain model.
-- `src/application/graph/pipeline.py`: active LangGraph workflow and `run_pipeline`.
-- `src/application/guardrails.py`: Gia Lai scope and prompt-safety checks.
-- `src/application/services/itinerary_service.py`: REST custom itinerary orchestration.
-- `src/application/services/distance.py`: distance helpers.
-- `src/application/services/realtime_search.py`: Tavily realtime enrichment.
-- `src/infrastructure/qdrant_repo.py`: Qdrant access and payload mapping.
-- `src/infrastructure/session_store.py`: in-memory WebSocket session store.
-- `src/presentation/ws/chat.py`: `/ws/chat` WebSocket endpoint.
-- `src/presentation/api/itineraries.py`: `/api/v1/itineraries/custom` REST endpoint.
-- `src/presentation/schemas.py`: `BaseResponse` and `ErrorResponse`.
-- `src/presentation/schemas_itinerary.py`: REST itinerary request/response schemas.
-- `src/presentation/schemas_ws.py`: WebSocket protocol schemas.
-- `tests/test_guardrails_and_route_optimizer.py`: main regression anchor for
-  guardrails, custom itinerary, day grouping, hotel/start location, and route behavior.
+- `domain/` must remain framework- and database-independent.
+- `application/` owns use cases, graph orchestration, route optimization, prompt
+  safety flow, and service-level business rules.
+- `infrastructure/` owns external persistence and adapters.
+- `presentation/` owns HTTP/WebSocket contracts, Pydantic request/response
+  schemas, and FastAPI dependency injection.
 
-## 4. Active Runtime Paths
+## Whole-Repo Map
 
-### 4.1 FastAPI Startup
+### Entry And Runtime
 
-`src/main.py`:
+- `src/main.py`
+  - Creates the FastAPI app.
+  - Loads `.env`.
+  - Adds CORS.
+  - Runs `setup_logging()` on startup.
+  - Includes `chat.router` and `itineraries.router`.
+  - Local direct run uses `settings.APP_HOST` and `settings.APP_PORT`.
 
-1. Loads `.env` with `load_dotenv(override=True)`.
-2. Creates `FastAPI(title=settings.PROJECT_NAME)`.
-3. Adds permissive CORS for the backend proxy path.
-4. Calls `setup_logging()` on startup.
-5. Includes WebSocket and itinerary routers:
-   - `chat.router`
-   - `itineraries.router`
-6. Local direct run uses `settings.APP_HOST` and `settings.APP_PORT`.
+- `Dockerfile`
+  - Uses `uv`.
+  - Starts Uvicorn with env-driven host/port:
+    `APP_HOST`, `APP_PORT`, and `PORT` fallback.
 
-Docker startup is env-driven in `Dockerfile` and must remain compatible with
-`APP_HOST`, `APP_PORT`, and `PORT`.
+- `.github/workflows/ci-cd.yml`
+  - CI/CD workflow for Docker image build/push.
 
-### 4.2 WebSocket Chat Flow
+### Core
+
+- `src/core/config.py`
+  - `Settings` class.
+  - All runtime environment variables belong here.
+
+- `src/core/logging.py`
+  - Loguru setup.
+
+### Domain
+
+- `src/domain/working_memory.py`
+  - `WorkingMemory` and `detect_step`.
+  - Tracks session step, trip constraints, derived filters, current itinerary,
+    learned constraints, and messages.
+
+- `src/domain/itinerary.py`
+  - Structured itinerary domain models: `Activity`, `DayPlan`, `Itinerary`.
+
+- `src/domain/entities.py`
+  - Older/general domain entities.
+
+### Application
+
+- `src/application/graph/pipeline.py`
+  - Active LangGraph workflow.
+  - Defines `create_workflow()` and `run_pipeline()`.
+  - Runs guardrails before graph invocation.
+
+- `src/application/graph/state.py`
+  - `AgentState` shared between LangGraph nodes.
+
+- `src/application/graph/nodes/router.py`
+  - Routes the graph based on `WorkingMemory.current_step`.
+
+- `src/application/graph/nodes/cold_start.py`
+  - Collects required trip fields and derives filters/preferences.
+
+- `src/application/graph/nodes/elicitation.py`
+  - Collects user vibe/preferences.
+
+- `src/application/graph/nodes/qdrant_search.py`
+  - Active Qdrant retrieval node for WebSocket planning.
+
+- `src/application/graph/nodes/route_optimizer.py`
+  - Route ordering, distance estimates, route summary metadata.
+
+- `src/application/graph/nodes/llm_planner.py`
+  - LLM itinerary generation.
+
+- `src/application/graph/nodes/critic.py`
+  - Refine/confirm/realtime question handling.
+
+- `src/application/graph/nodes/finalize.py`
+  - Finalized itinerary response path.
+
+- `src/application/graph/nodes/planner.py`
+  - Legacy/reference planner path. Do not assume it is active unless pipeline
+    edges prove it.
+
+- `src/application/graph/nodes/reflection.py`
+  - Legacy/reference reflection path. Do not assume it is active unless pipeline
+    edges prove it.
+
+- `src/application/guardrails.py`
+  - Gia Lai scope and prompt-safety guardrails.
+
+- `src/application/services/itinerary_service.py`
+  - REST custom itinerary orchestration from backend-selected POI snapshots.
+
+- `src/application/services/distance.py`
+  - Distance helpers.
+
+- `src/application/services/realtime_search.py`
+  - Tavily realtime enrichment with timeout/retry behavior.
+
+- `src/application/interfaces.py`
+  - Application-layer repository/service interfaces.
+
+- `src/application/use_cases.py`
+  - Generic/example use cases.
+
+### Infrastructure
+
+- `src/infrastructure/qdrant_repo.py`
+  - Qdrant search implementation.
+  - Must preserve payload metadata for downstream planner/validator logic.
+
+- `src/infrastructure/session_store.py`
+  - In-memory session store for WebSocket `WorkingMemory`.
+
+- `src/infrastructure/database.py`
+  - Database connection setup.
+
+- `src/infrastructure/models.py`
+  - SQLAlchemy models.
+
+- `src/infrastructure/repositories.py`
+  - Repository implementations.
+
+- `src/infrastructure/vector_db.py`
+  - Vector DB setup/helper code.
+
+### Presentation
+
+- `src/presentation/ws/chat.py`
+  - WebSocket endpoint at `/ws/chat`.
+  - Loads/saves session memory and streams `ws_responses`.
+
+- `src/presentation/api/itineraries.py`
+  - REST endpoint at `POST /api/v1/itineraries/custom`.
+  - Wraps success with `BaseResponse`.
+
+- `src/presentation/api/items.py`
+  - Example/generic item API. Do not treat it as the itinerary contract.
+
+- `src/presentation/schemas.py`
+  - `BaseResponse`, `ErrorResponse`, and generic item schemas.
+
+- `src/presentation/schemas_itinerary.py`
+  - REST custom itinerary request/response schemas.
+
+- `src/presentation/schemas_ws.py`
+  - WebSocket protocol schemas and message type docs.
+
+- `src/presentation/dependencies.py`
+  - FastAPI dependency providers.
+
+### Tests And Local Utilities
+
+- `tests/test_guardrails_and_route_optimizer.py`
+  - Main regression anchor for guardrails, route optimization, custom itinerary
+    behavior, day grouping, hotel/start-location handling, and POI validation.
+
+- `tests/test_client.html`
+  - Manual WebSocket test client.
+
+- `tests/test_search.py`, `tests/check_qdrant.py`, `tests/check_methods.py`
+  - Qdrant/search diagnostic scripts/tests.
+
+- `tests/test_langsmith.py`
+  - LangSmith diagnostic test.
+
+## Active Runtime Flows
+
+### FastAPI Startup Flow
+
+1. `src/main.py` loads `.env` with `load_dotenv(override=True)`.
+2. Builds the `FastAPI` app.
+3. Adds permissive CORS for backend/frontend integration.
+4. Runs Loguru setup on startup.
+5. Includes:
+   - `src.presentation.ws.chat.router`
+   - `src.presentation.api.itineraries.router`
+6. Direct local run uses:
+   - `settings.APP_HOST`
+   - `settings.APP_PORT`
+
+### WebSocket Chat Flow
 
 Endpoint:
 
 - URL: `/ws/chat`
-- Query: `session_id=<id>`
+- Query parameter: `session_id`
 - Implementation: `src/presentation/ws/chat.py`
 
-Runtime flow:
+Flow:
 
 1. Client connects to `/ws/chat?session_id=<id>`.
-2. `get_session(session_id)` loads `WorkingMemory` from the in-memory session store.
-3. Empty cold-start sessions auto-run `run_pipeline(session_id, "", memory)` so
-   the client receives a cold-start form message.
-4. Incoming WebSocket text must be JSON. The endpoint reads:
-   - `payload`
-   - `payload.chip_value` first, otherwise `payload.message`
-5. `run_pipeline(session_id, user_message, memory, payload=payload)` runs the graph.
-6. `save_session(final_state["memory"])` persists session memory.
-7. Each item in `final_state["ws_responses"]` is sent back as JSON.
+2. Endpoint accepts the socket and loads memory with `get_session(session_id)`.
+3. If memory is a fresh cold-start session, it runs the pipeline once with an
+   empty message so the client receives a cold-start form response.
+4. For each incoming text frame:
+   - Parse JSON.
+   - Read `payload`.
+   - Use `payload.chip_value` first, otherwise `payload.message`.
+   - Reload session memory.
+   - Call `run_pipeline(session_id, user_message, memory, payload=payload)`.
+   - Save returned memory with `save_session(...)`.
+   - Send each dict in `ws_responses` back to the client.
+5. Invalid JSON produces an `error` response.
+6. Unexpected processing failures are logged with Loguru and return a generic
+   `error` response if the socket is still open.
 
-Active graph path:
+Active graph in `src/application/graph/pipeline.py`:
 
 ```text
 router_node
@@ -151,71 +300,68 @@ router_node
   -> llm_planner
   -> END
 
-refine path:
-router_node -> critic -> qdrant_search | finalized | END
+router_node
+  -> critic
+  -> qdrant_search | finalized | END
 ```
 
-`run_pipeline` always calls `check_user_message_scope()` before invoking the
-graph. If the guardrail blocks the message, it returns a `guardrail` WebSocket
-response and does not invoke LangGraph.
+`run_pipeline()` always checks `check_user_message_scope()` before invoking the
+graph. Guardrail-blocked messages do not enter LangGraph.
 
-### 4.3 REST Custom Itinerary Flow
+### REST Custom Itinerary Flow
 
 Endpoint:
 
 - Method: `POST`
 - URL: `/api/v1/itineraries/custom`
 - Router: `src/presentation/api/itineraries.py`
-- Request/response schemas: `src/presentation/schemas_itinerary.py`
+- Schema: `src/presentation/schemas_itinerary.py`
 - Service: `src/application/services/itinerary_service.py`
 
-Purpose:
+Contract:
 
-This is an internal Agent API for the NestJS backend. The backend sends
-already-selected, already-validated POI snapshots in `selectedPois`.
+- This endpoint is for the NestJS backend/internal Agent API.
+- It receives backend-selected POI snapshots through `selectedPois`.
+- It must not query Qdrant/database to resolve or replace POIs.
+- It must not add, replace, or invent selected locations.
+- It validates duplicate `poiId` values and Gia Lai coordinate bounds.
+- `startLocation` is a route anchor, not a sightseeing activity.
+- A hotel-like selected POI can be used as the start anchor and excluded from
+  activity POIs.
+- `optimizeRoute=false` must preserve user-selected ordering where route logic
+  allows.
+- LLM output must be validated against allowed selected activity POI IDs.
 
-Hard contract:
+Service sequence:
 
-- Do not query Qdrant or the database to resolve POIs for this endpoint.
-- Do not add, replace, or invent selected locations.
-- Validate duplicate `poiId` values and Gia Lai coordinate bounds in schemas.
-- `optimizeRoute=false` must preserve user-selected order where route logic allows.
-- `startLocation` is an optional route anchor, not a sightseeing POI.
-- A hotel-like selected POI may be used as the route start anchor and excluded
-  from activity POIs.
-- The service validates the LLM output and raises if the itinerary contains POIs
-  outside the allowed selected activity POIs.
-
-Current service behavior:
-
-1. Map `PoiInput` snapshots to planner dictionaries.
-2. Determine `start_location` from explicit `startLocation` or a hotel-like POI.
-3. Remove the start/hotel anchor from activity POIs.
+1. Convert each `PoiInput` into planner/optimizer metadata.
+2. Determine start anchor from explicit `startLocation` or hotel-like selected POI.
+3. Remove that start anchor from activity POIs.
 4. Split activity POIs by trip days.
-5. Optimize each day through `optimize_route()`.
-6. Attach `day_number`, `day_route_order`, route order, and distance metadata.
+5. Optimize each day's route through `optimize_route()`.
+6. Add `day_number`, `day_route_order`, route order, and distance metadata.
 7. Call `generate_itinerary_from_pois()`.
-8. Normalize recoverable route-order IDs from the LLM back to real POI IDs.
-9. Reject invented/unknown POI IDs.
-10. Return `CustomItineraryResponse` wrapped by `BaseResponse`.
+8. Normalize recoverable route-order IDs back to real POI IDs.
+9. Raise if the LLM invented or returned unknown POI IDs.
+10. Return `CustomItineraryResponse`, wrapped in `BaseResponse` by the router.
 
-## 5. Data Contracts
+## Data And API Contracts
 
-### 5.1 REST Envelope
+### REST Response Envelope
 
-All REST responses must use:
+All REST routes must return:
 
 - `BaseResponse[T]` for success.
-- `ErrorResponse` for errors.
+- `ErrorResponse` for failures.
 
-Defined in `src/presentation/schemas.py`.
+These are defined in `src/presentation/schemas.py`.
 
-When adding a REST route, use `response_model=BaseResponse[YourDataSchema]`.
+When adding a route, use `response_model=BaseResponse[YourSchema]`.
 
-### 5.2 WebSocket Message Types
+### WebSocket Message Types
 
-WebSocket responses are listed in `src/presentation/schemas_ws.py`.
-Expected server message types include:
+Keep graph node response dicts aligned with `src/presentation/schemas_ws.py`.
+Known server message types:
 
 - `cold_start_form`
 - `elicitation_question`
@@ -223,30 +369,39 @@ Expected server message types include:
 - `guardrail`
 - `error`
 
-The WebSocket endpoint currently sends raw dicts from graph nodes; keep those
-dicts aligned with schema names and fields.
+### Working Memory Contract
 
-### 5.3 Working Memory
-
-`WorkingMemory` in `src/domain/working_memory.py` tracks:
+`WorkingMemory` in `src/domain/working_memory.py` is the persistent session model.
+It currently tracks:
 
 - `session_id`
 - `current_step`: `cold_start`, `elicit`, `plan`, `refine`, `finalized`
-- cold-start fields: `duration`, `group`, `transport`
-- derived route/search settings: `intensity_filter`, `max_km_per_day`, `optimize_route`
-- elicitation: `vibe_query`
-- itinerary: `current_itinerary`
-- reflection: `learned_constraints`
-- chat history: `messages`
+- `duration`, `group`, `transport`
+- `intensity_filter`, `max_km_per_day`, `optimize_route`
+- `vibe_query`
+- `current_itinerary`
+- `learned_constraints`
+- `messages`
 
-Do not add presentation-specific fields to domain memory unless the state is
-truly part of the domain/session model.
+Do not add presentation-only fields to `WorkingMemory`. If data only belongs to
+one request/response, keep it in presentation schemas or graph transient state.
 
-## 6. Configuration And Environment
+### Graph State Contract
+
+`AgentState` in `src/application/graph/state.py` carries:
+
+- persistent-ish values: `memory`, `ws_responses`, `user_message`, `user_payload`
+- transients: `qdrant_results`, `validated_pois`, `route_summary`,
+  `critic_feedback`
+
+When adding a graph node output, ensure downstream nodes and tests know whether
+the value is persistent memory or one-turn transient state.
+
+## Configuration Contract
 
 Runtime configuration belongs in `src/core/config.py` on `Settings`.
 
-Current important settings:
+Important settings:
 
 - `PROJECT_NAME`
 - `APP_HOST`
@@ -258,63 +413,63 @@ Current important settings:
 - `EMBEDDING_MODEL`
 - `TAVILY_API_KEY`, `TAVILY_TIMEOUT_SECONDS`, `TAVILY_MAX_RETRIES`
 - `GOOGLE_MAPS_API_KEY`
-- `LANGCHAIN_API_KEY`, `LANGCHAIN_PROJECT`, `LANGCHAIN_TRACING_V2`, `LANGCHAIN_ENDPOINT`
+- `LANGCHAIN_API_KEY`, `LANGCHAIN_PROJECT`, `LANGCHAIN_TRACING_V2`,
+  `LANGCHAIN_ENDPOINT`
 
 Rules:
 
-- Add new runtime knobs to `Settings`, `.env.example`, and deployment docs/config.
-- Do not hardcode host, port, API keys, model names, collection names, or timeout
-  values inside business logic.
+- Do not hardcode host, port, model, API key, collection, or timeout values in
+  business logic.
+- New runtime knobs must be added to `Settings` and `.env.example`.
 - `.env` is local/runtime-only and must not be baked into Docker images.
 - `.dockerignore` should continue excluding `.env`.
-- Note current naming drift: `src/core/config.py` uses `LANGCHAIN_*`, while
-  `.env.example` may still contain `LANGSMITH_*`. Verify tracing env names before
-  changing LangSmith behavior.
+- Verify LangSmith naming before changing tracing: source uses `LANGCHAIN_*`,
+  while `.env.example` may still show `LANGSMITH_*`.
 
-## 7. Qdrant And Retrieval Rules
+## Qdrant And Retrieval Contract
 
-Active retrieval code lives in `src/application/graph/nodes/qdrant_search.py`
-and `src/infrastructure/qdrant_repo.py`.
+WebSocket planning uses Qdrant through:
+
+- `src/application/graph/nodes/qdrant_search.py`
+- `src/infrastructure/qdrant_repo.py`
 
 Rules:
 
-- Preserve payload metadata from Qdrant. Downstream planner/validator logic
-  depends on fields such as `poi_id`, `poi_name`, coordinates, cost, category,
-  tags, and intensity.
-- Avoid empty filters that zero out retrieval results.
-- Do not use REST custom itinerary to fetch/replace backend-selected POIs.
-  REST custom itinerary gets its POIs from `selectedPois`; WebSocket planning
-  uses Qdrant.
-- Treat `src/application/graph/nodes/planner.py` and `reflection.py` as legacy
-  references unless current pipeline edges prove otherwise.
+- Preserve Qdrant payload metadata. Downstream code depends on `poi_id`,
+  `poi_name`, `lat`, `lng`, `cost`, `category`, `tags`, and `intensity_level`.
+- Avoid empty filters that accidentally return no results.
+- Prefer the active `qdrant_search -> route_optimizer -> llm_planner` graph path.
+- Do not use Qdrant inside REST custom itinerary creation; that endpoint uses
+  backend-provided `selectedPois`.
 
-## 8. LLM, Prompt Safety, And Realtime Enrichment
+## Prompt Safety And Realtime Rules
 
-- User messages must stay within Gia Lai travel scope.
-- Guard against prompt injection, role/system prompt override attempts,
-  unrelated prompts, and requests for hidden instructions.
-- Do not expose system prompts, secrets, environment values, or internal traces.
+- Keep user requests within Gia Lai travel scope.
+- Guard against prompt injection, role override attempts, unrelated prompts, and
+  requests for hidden/system instructions.
+- Never reveal secrets, environment values, hidden prompts, or internal traces.
 - Tavily realtime search is optional and must degrade gracefully.
-- Tavily timeouts/retries are controlled by `TAVILY_TIMEOUT_SECONDS` and
+- Tavily timeout/retry settings come from `TAVILY_TIMEOUT_SECONDS` and
   `TAVILY_MAX_RETRIES`.
-- Event/detail answers should be concise and summary-oriented when used in chat.
-- Route ordering belongs to route optimization logic, not to ad hoc LLM-only
-  assumptions.
+- Event/detail answers should be concise and summary-oriented when sent to chat.
 
-## 9. Dependency Injection And Layer Boundaries
+## Dependency And Coding Rules
 
-- Dependency providers live in `src/presentation/dependencies.py`.
-- Routers should receive services through `Depends(...)`.
-- Application services should not import FastAPI request/response objects.
-- Domain models should not import infrastructure, FastAPI, LangChain, or Qdrant.
-- Infrastructure should implement repository/external-service details and map
-  raw data into domain/application-friendly structures.
-- Presentation schemas are API contracts; keep them separate from domain models
-  unless the domain model is intentionally part of the contract.
+- Use `uv`; do not add dependencies with raw `pip` commands.
+- Add new dependencies to `pyproject.toml` via `uv add <package>` when possible.
+- Use Loguru: `from loguru import logger`.
+- Do not add `print()` or standard-library `logging` for application logs.
+- Routers receive services through `Depends(...)` providers in
+  `src/presentation/dependencies.py`.
+- Application services should not import FastAPI request/response classes.
+- Domain models should not import FastAPI, SQLAlchemy, Qdrant, LangChain, or
+  infrastructure adapters.
+- Keep refactors separate from behavior changes unless the user explicitly asks
+  for both.
 
-## 10. Commands And Verification
+## Verification Commands
 
-Use PowerShell-friendly commands from the repository root.
+Run commands from the repository root in PowerShell.
 
 Install/sync dependencies:
 
@@ -322,123 +477,177 @@ Install/sync dependencies:
 uv sync
 ```
 
-Run the API locally:
+Run API locally:
 
 ```powershell
 uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Run tests:
+Run all tests:
 
 ```powershell
 uv run pytest
 ```
 
-Fallback on this Windows checkout if `uv run pytest` hits cache/profile issues:
+Fallback on this Windows checkout if `uv run pytest` has cache/profile issues:
 
 ```powershell
 .venv\Scripts\python.exe -m pytest
 ```
 
-Run focused tests for itinerary/guardrail/route behavior:
+Focused itinerary/guardrail/route tests:
 
 ```powershell
 .venv\Scripts\python.exe -m pytest tests/test_guardrails_and_route_optimizer.py
 ```
 
-Run lint if available:
+Lint:
 
 ```powershell
 uv run ruff check src tests
 ```
 
-Compile-check Python when a narrow syntax check is enough:
+Syntax compile check:
 
 ```powershell
 .venv\Scripts\python.exe -m compileall src tests
 ```
 
-Before reporting completion:
+For docs-only edits, tests are usually not required. Still inspect the diff and
+state that the change was docs-only.
 
-- State exactly which commands passed.
-- If a command was not run, say why.
-- Separate failures caused by touched files from unrelated existing repo debt.
+## Change Playbooks
 
-## 11. Task Routing Guide
+### REST Itinerary Contract
 
-- Change REST itinerary contract:
-  - `src/presentation/schemas_itinerary.py`
-  - `src/presentation/api/itineraries.py`
-  - `src/application/services/itinerary_service.py`
-  - tests in `tests/test_guardrails_and_route_optimizer.py`
+Read first:
 
-- Change WebSocket behavior:
-  - `src/presentation/ws/chat.py`
-  - `src/presentation/schemas_ws.py`
-  - `src/application/graph/pipeline.py`
-  - relevant node in `src/application/graph/nodes/`
-  - `src/domain/working_memory.py` if session state changes
+- `src/presentation/schemas_itinerary.py`
+- `src/presentation/api/itineraries.py`
+- `src/application/services/itinerary_service.py`
+- `tests/test_guardrails_and_route_optimizer.py`
 
-- Change graph planning:
-  - `src/application/graph/pipeline.py`
-  - `src/application/graph/state.py`
-  - `src/application/graph/nodes/qdrant_search.py`
-  - `src/application/graph/nodes/route_optimizer.py`
-  - `src/application/graph/nodes/llm_planner.py`
+Verify:
 
-- Change route distance/ordering:
-  - `src/application/graph/nodes/route_optimizer.py`
-  - `src/application/services/distance.py`
-  - tests in `tests/test_guardrails_and_route_optimizer.py`
+- Focused pytest file above.
+- Confirm response is still wrapped in `BaseResponse`.
+- Confirm no Qdrant/database POI replacement was introduced.
 
-- Change realtime/event behavior:
-  - `src/application/graph/nodes/critic.py`
-  - `src/application/services/realtime_search.py`
-  - `src/core/config.py` for env knobs
+### WebSocket Chat Or Graph Behavior
 
-- Change Qdrant retrieval:
-  - `src/application/graph/nodes/qdrant_search.py`
-  - `src/infrastructure/qdrant_repo.py`
-  - `src/core/config.py` for collection/model/env knobs
+Read first:
 
-- Change app startup/deployment:
-  - `src/main.py`
-  - `src/core/config.py`
-  - `Dockerfile`
-  - `.env.example`
-  - `.github/workflows/ci-cd.yml`
+- `src/presentation/ws/chat.py`
+- `src/presentation/schemas_ws.py`
+- `src/application/graph/pipeline.py`
+- `src/application/graph/state.py`
+- relevant node under `src/application/graph/nodes/`
+- `src/domain/working_memory.py` if session state changes
 
-## 12. Documentation Rules
+Verify:
 
-- Keep docs short, source-backed, and integration-oriented.
-- Put team-shareable Markdown docs under `docs/`.
-- If code and docs disagree, update docs or call out the drift.
-- Do not document imagined endpoints. Search the source first.
-- When documenting mobile/frontend/backend integration, include the real REST and
-  WebSocket contracts and the envelope/message types.
-- `README.md` is currently not a reliable onboarding source; use this file and
-  source inspection first.
+- Focused tests if behavior is covered.
+- Manual reasoning over `ws_responses` shape.
+- `tests/test_client.html` can be used for manual WebSocket checks.
 
-## 13. Red Flags For Agents
+### Qdrant Retrieval
 
-Stop and inspect more carefully when you see:
+Read first:
 
-- A request to "replace WebSocket with SSE" while source still exposes `/ws/chat`.
-- Docs mentioning endpoints that `rg` cannot find in source.
-- A REST custom itinerary change that tries to query Qdrant or invent locations.
-- Empty Qdrant filters or metadata missing `poi_id`.
-- LLM output accepted without validating selected POI IDs.
-- New env vars used in code but missing from `Settings` or `.env.example`.
-- `print()` or standard `logging` added instead of Loguru.
-- Broad refactors mixed into a bug fix.
-- Changes to `.env` or secrets.
+- `src/application/graph/nodes/qdrant_search.py`
+- `src/infrastructure/qdrant_repo.py`
+- `src/core/config.py`
+- `tests/test_search.py` or Qdrant diagnostic scripts if relevant
 
-## 14. Final Response Expectations
+Verify:
 
-When finishing work in this repo:
+- Preserve payload metadata.
+- Avoid empty filter behavior.
+- Do not mix this path into REST custom itinerary.
 
-- Summarize files changed and behavior changed.
-- Mention tests/commands run.
-- Mention any existing unrelated dirty files only if they affect the task.
-- Be clear about uncertainty. If something was inferred from memory or old docs,
-  say it may be stale and prefer source verification.
+### Route Optimization Or Distances
+
+Read first:
+
+- `src/application/graph/nodes/route_optimizer.py`
+- `src/application/services/distance.py`
+- `src/application/services/itinerary_service.py`
+- `tests/test_guardrails_and_route_optimizer.py`
+
+Verify:
+
+- Focused pytest file.
+- Confirm `optimizeRoute=false` and start/hotel anchor behavior if touched.
+
+### LLM Planner Or Critic
+
+Read first:
+
+- `src/application/graph/nodes/llm_planner.py`
+- `src/application/graph/nodes/critic.py`
+- `src/application/services/realtime_search.py`
+- `src/application/guardrails.py`
+- relevant tests
+
+Verify:
+
+- Prompt safety still runs before graph invocation.
+- POI IDs are validated when itinerary output is generated from selected POIs.
+- Tavily failure degrades gracefully.
+
+### Config, Docker, Or CI/CD
+
+Read first:
+
+- `src/core/config.py`
+- `.env.example`
+- `Dockerfile`
+- `.dockerignore`
+- `.github/workflows/ci-cd.yml`
+- `src/main.py`
+
+Verify:
+
+- New env vars are present in `Settings` and `.env.example`.
+- Docker startup remains env-driven.
+- `.env` remains excluded.
+
+### Documentation
+
+Read first:
+
+- `AGENTS.md`
+- relevant source files for the thing being documented
+- existing docs under `docs/`, if present
+
+Rules:
+
+- Keep docs source-backed.
+- Put team-shareable integration docs under `docs/`.
+- Do not document imagined endpoints or stale architecture.
+- If updating architecture or contracts, update `AGENTS.md`.
+
+## Red Flags
+
+Stop and inspect more carefully if any of these appear:
+
+- A task claims WebSocket was replaced while source still exposes `/ws/chat`.
+- Docs mention SSE/chat-stream endpoints but `rg` cannot find implementations.
+- REST custom itinerary code tries to query Qdrant/database for selected POIs.
+- LLM itinerary output is accepted without checking selected POI IDs.
+- Qdrant results lose payload metadata such as `poi_id`.
+- New env values are used without `Settings` and `.env.example` updates.
+- New logging uses `print()` or standard `logging`.
+- A bug fix includes broad unrelated refactors.
+- `.env`, keys, prompts, or internal instructions are exposed.
+
+## Final Response Contract
+
+When finishing work:
+
+- Summarize what changed.
+- List files touched.
+- List verification commands run and whether they passed.
+- If no tests were run, say why.
+- Mention unrelated dirty worktree files only if they affect the task.
+- Be explicit about uncertainty and source-vs-doc discrepancies.
